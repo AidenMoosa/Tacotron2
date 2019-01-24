@@ -34,7 +34,7 @@ for _ in range(params.epochs):
         tacotron2.zero_grad()
 
         padded_texts, text_lengths, padded_mels = batch
-        y_pred = tacotron2(padded_texts, text_lengths)
+        y_pred = tacotron2(padded_texts, text_lengths, padded_mels)
         loss = criterion(y_pred, padded_mels)
 
         print("Loss: " + str(loss.item()))
