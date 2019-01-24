@@ -54,11 +54,9 @@ class LabelledMelDataset(Dataset):
         self.paths = paths
         self.labels = labels
 
-    def label_to_onehot(self, label):
-        onehots = [[0 for _ in range(n_characters)] for _ in range(len(label))]
-        for i, ch in enumerate(label):
-            onehots[i][all_characters.find(ch)] = 1
-        return onehots
+# RENAME
+    def label_to_list(self, label):
+        return [all_characters.find(ch) for ch in label]
 
     def audiopath_to_mel(self, path):
         y, sr = librosa.load(path)
@@ -72,7 +70,7 @@ class LabelledMelDataset(Dataset):
         return mel
 
     def __getitem__(self, idx):
-        text = self.label_to_onehot(self.labels[idx])
+        text = self.label_to_list(self.labels[idx])
         mel = self.audiopath_to_mel(self.paths[idx])
 
         return text, mel
@@ -94,11 +92,12 @@ class PadCollate():
     def __call__(self, batch):
         texts, mels = zip(*batch)
 
+        text_lengths = [len(text) for text in texts]
         max_text_len = max(map(lambda text: len(text), texts))
-        padded_texts = [self.pad_tensor(torch.LongTensor(text), max_text_len, dim=0) for text in texts]
+        padded_texts = torch.stack([self.pad_tensor(torch.LongTensor(text), max_text_len, dim=0) for text in texts])
 
         max_mel_len = max(map(lambda mel: mel.shape[-1], mels))
-        padded_mels = [self.pad_tensor(torch.from_numpy(mel), max_mel_len) for mel in mels]
+        padded_mels = torch.stack([self.pad_tensor(torch.from_numpy(mel), max_mel_len) for mel in mels])
 
-        return torch.stack(padded_texts), torch.stack(padded_mels)
+        return padded_texts, text_lengths, padded_mels
 

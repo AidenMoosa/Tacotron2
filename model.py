@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
@@ -18,15 +19,17 @@ class Encoder(nn.Module):
 
         self.lstm = nn.LSTM(params.embedding_dim, int(params.embedding_dim / 2), batch_first=True, bidirectional=True)
 
+    def forward(self, embedded_inputs, input_lengths):
+        inputs = F.dropout(F.relu(self.conv1_bn(self.conv1(embedded_inputs))), 0.5, self.training)
+        inputs = F.dropout(F.relu(self.conv2_bn(self.conv2(inputs))), 0.5, self.training)
+        inputs = F.dropout(F.relu(self.conv3_bn(self.conv3(inputs))), 0.5, self.training)
 
+        inputs = nn.utils.rnn.pack_padded_sequence(inputs.transpose_(1, 2), input_lengths, batch_first=True)
+        outputs, _ = self.lstm(inputs)
+        outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True)
+        
+        return outputs
 
-    def forward(self, input):
-        output = F.dropout(F.relu(self.conv1_bn(self.conv1(input))), 0.5, self.training)
-        output = F.dropout(F.relu(self.conv2_bn(self.conv2(output))), 0.5, self.training)
-        output = F.dropout(F.relu(self.conv3_bn(self.conv3(output))), 0.5, self.training)
-        output = self.lstm(output.transpose(1, 2))
-
-        return output
 
 # want implement location-sensitive attention with scoring mechanism
 # e_i,j = w^T tanh(W_s_i-1 + Vh_j + Uf_i,j + b)
@@ -47,7 +50,6 @@ class Attention(nn.Module):
 
         self.e = nn.Linear(128, 1, bias=False)
 
-
     def forward(self, attention_hidden_state, memory, processed_memory, attention_weights):
         processed_query = self.query_dense(attention_hidden_state)
 
@@ -63,6 +65,7 @@ class Attention(nn.Module):
         attention_context = attention_context.squeeze(1)
 
         return attention_context, attention_weights
+
 
 class Decoder(nn.Module):
     def __init__(self):
@@ -90,17 +93,18 @@ class Decoder(nn.Module):
 
         self.stop_dense = nn.Linear(1024 + 512, 1)
 
-    def forward(self, input):
-        input = F.dropout(F.relu(self.prenet_dense1(input)), p=0.5)
-        input = F.dropout(F.relu(self.prenet_dense2(input)), p=0.5)
+    def forward(self, inputs):
+        inputs = F.dropout(F.relu(self.prenet_dense1(inputs)), p=0.5)
+        inputs = F.dropout(F.relu(self.prenet_dense2(inputs)), p=0.5)
 
-        input = F.dropout(torch.tanh(self.postnet_conv1_bn(self.postnet_conv1(input))), 0.5, self.training)
-        input = F.dropout(torch.tanh(self.postnet_conv2_bn(self.postnet_conv2(input))), 0.5, self.training)
-        input = F.dropout(torch.tanh(self.postnet_conv3_bn(self.postnet_conv3(input))), 0.5, self.training)
-        input = F.dropout(torch.tanh(self.postnet_conv4_bn(self.postnet_conv4(input))), 0.5, self.training)
-        input = F.dropout(self.postnet_conv5_bn(self.postnet_conv5(input)), 0.5, self.training)
+        inputs = F.dropout(torch.tanh(self.postnet_conv1_bn(self.postnet_conv1(inputs))), 0.5, self.training)
+        inputs = F.dropout(torch.tanh(self.postnet_conv2_bn(self.postnet_conv2(inputs))), 0.5, self.training)
+        inputs = F.dropout(torch.tanh(self.postnet_conv3_bn(self.postnet_conv3(inputs))), 0.5, self.training)
+        inputs = F.dropout(torch.tanh(self.postnet_conv4_bn(self.postnet_conv4(inputs))), 0.5, self.training)
+        inputs = F.dropout(self.postnet_conv5_bn(self.postnet_conv5(inputs)), 0.5, self.training)
 
-        return input
+        return inputs
+
 
 class Tacotron2(nn.Module):
     def __init__(self):
@@ -110,8 +114,9 @@ class Tacotron2(nn.Module):
         self.encoder = Encoder()
         self.decoder = Decoder()
 
-    def forward(self, input):
-        embedded_input = self.embedding(input)
-        print(embedded_input.size())
+    def forward(self, padded_texts, text_lengths):
+        embedded_inputs = self.embedding(padded_texts)
 
-        return embedded_input
+        encoder_outputs = self.encoder(embedded_inputs, text_lengths)
+
+        return encoder_outputs

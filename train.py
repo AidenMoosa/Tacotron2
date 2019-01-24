@@ -24,8 +24,8 @@ tacotron2 = Tacotron2()
 tacotron2.train()
 
 optimiser = optim.Adam(tacotron2.parameters(),
-                  lr=params.learning_rate,
-                  weight_decay=params.weight_decay)
+                       lr=params.learning_rate,
+                       weight_decay=params.weight_decay)
 
 criterion = nn.MSELoss()
 
@@ -33,11 +33,9 @@ for _ in range(params.epochs):
     for batch in data_loader:
         tacotron2.zero_grad()
 
-        x, y = batch
-        print(x.size())
-        print(y.size())
-        y_pred = tacotron2(x)
-        loss = criterion(y_pred, y)
+        padded_texts, text_lengths, padded_mels = batch
+        y_pred = tacotron2(padded_texts, text_lengths)
+        loss = criterion(y_pred, padded_mels)
 
         print("Loss: " + str(loss.item()))
 
