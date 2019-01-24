@@ -1,18 +1,46 @@
+import params
+from data import LabelledMelDataset, PadCollate
 from model import Tacotron2
+import torch
+import numpy as np
+from torch import optim
+from torch.utils import data
+import torch.nn as nn
+
+seed = 42
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+
+dataset = LabelledMelDataset('resources')
+pad_collate = PadCollate()
+
+data_loader = data.DataLoader(dataset,
+                              batch_size=5,
+                              collate_fn=pad_collate,
+                              drop_last=True)
 
 tacotron2 = Tacotron2()
-
 tacotron2.train()
 
-for _ in range(10):
-    print("henlo")
+optimiser = optim.Adam(tacotron2.parameters(),
+                  lr=params.learning_rate,
+                  weight_decay=params.weight_decay)
 
-'''
-for i in range(avd.__len__()):
-    name, label = avd.__getitem__(i)
+criterion = nn.MSELoss()
 
-    input_tensor = line_to_tensor(label).unsqueeze(0)
+for _ in range(params.epochs):
+    for batch in data_loader:
+        tacotron2.zero_grad()
 
-    output, _ = encoder(input_tensor)
-    print(output[0])
-'''
+        x, y = batch
+        print(x.size())
+        print(y.size())
+        y_pred = tacotron2(x)
+        loss = criterion(y_pred, y)
+
+        print("Loss: " + str(loss.item()))
+
+        loss.backward()
+
+        optimiser.step()

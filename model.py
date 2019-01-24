@@ -1,43 +1,22 @@
+import params
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import string
-import numpy as np
-
-seed = 42
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-
-all_characters = string.printable
-n_characters = len(all_characters)
-embedding_dims = 512
-batch_size = 5
-
-character_embedding = nn.Embedding(n_characters, embedding_dims)
-
-# Find letter index from all_letters, e.g. "a" = 0
-def character_to_index(character):
-    return all_characters.find(character)
-
-def line_to_tensor(line):
-    character_indices = torch.LongTensor([character_to_index(ch) for ch in line])
-    return character_embedding(character_indices).t_()
 
 class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
 
-        self.conv1 = nn.Conv1d(embedding_dims, embedding_dims, kernel_size=5, padding=2)
-        self.conv1_bn = nn.BatchNorm1d(embedding_dims)
+        self.conv1 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2)
+        self.conv1_bn = nn.BatchNorm1d(params.embedding_dim)
 
-        self.conv2 = nn.Conv1d(embedding_dims, embedding_dims, kernel_size=5, padding=2)
-        self.conv2_bn = nn.BatchNorm1d(embedding_dims)
+        self.conv2 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2)
+        self.conv2_bn = nn.BatchNorm1d(params.embedding_dim)
 
-        self.conv3 = nn.Conv1d(embedding_dims, embedding_dims, kernel_size=5, padding=2)
-        self.conv3_bn = nn.BatchNorm1d(embedding_dims)
+        self.conv3 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2)
+        self.conv3_bn = nn.BatchNorm1d(params.embedding_dim)
 
-        self.lstm = nn.LSTM(embedding_dims, int(embedding_dims / 2), batch_first=True, bidirectional=True)
+        self.lstm = nn.LSTM(params.embedding_dim, int(params.embedding_dim / 2), batch_first=True, bidirectional=True)
 
 
 
@@ -61,7 +40,7 @@ class Attention(nn.Module):
 
         self.query_dense = nn.Linear(1024, 128, bias=False)
 
-        self.memory_dense = nn.Linear(embedding_dims, 128, bias=False)
+        self.memory_dense = nn.Linear(params.embedding_dim, 128, bias=False)
 
         self.location_conv = nn.Conv1d(2, 32, kernel_size=31, padding=15)
         self.location_dense = nn.Linear(32, 128, bias=False)
@@ -80,8 +59,8 @@ class Attention(nn.Module):
         energies = energies.squeeze(-1)
 
         attention_weights = F.softmax(energies, dim=1)
-        attention_context = torch.bmm(attention_weights.unsqueeze(1), memory) #same here
-        attention_context = attention_context.squeeze(1) #same here
+        attention_context = torch.bmm(attention_weights.unsqueeze(1), memory)
+        attention_context = attention_context.squeeze(1)
 
         return attention_context, attention_weights
 
@@ -127,30 +106,12 @@ class Tacotron2(nn.Module):
     def __init__(self):
         super(Tacotron2, self).__init__()
 
+        self.embedding = nn.Embedding(params.n_characters, params.embedding_dim)
         self.encoder = Encoder()
         self.decoder = Decoder()
-        
-
 
     def forward(self, input):
-        return input
+        embedded_input = self.embedding(input)
+        print(embedded_input.size())
 
-
-
-
-'''
-data, sampling_rate = librosa.load(name)
-
-S = librosa.feature.melspectrogram(y=data, sr=sampling_rate)
-
-plt.figure(figsize=(10, 4))
-librosa.display.specshow(librosa.power_to_db(S,
-                                             ref=np.max),
-                                             y_axis='mel', fmax=8000,
-                                             x_axis='time')
-plt.colorbar(format='%+2.0f dB')
-plt.title('Mel spectrogram')
-plt.tight_layout()
-librosa.display.waveplot(data, sr=sampling_rate)
-plt.show()
-'''
+        return embedded_input
