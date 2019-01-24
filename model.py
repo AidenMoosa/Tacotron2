@@ -42,17 +42,17 @@ class Attention(nn.Module):
     def __init__(self):
         super(Attention, self).__init__()
 
-        self.query_dense = nn.Linear(1024, 128, bias=False)
+        self.encoder_output_linear_proj = nn.Linear(params.embedding_dim, 128, bias=False)
 
-        self.memory_dense = nn.Linear(params.embedding_dim, 128, bias=False)
+        self.lstm_output_linear_proj = nn.Linear(1024, 128, bias=False)
 
         self.location_conv = nn.Conv1d(2, 32, kernel_size=31, padding=15)
         self.location_dense = nn.Linear(32, 128, bias=False)
 
         self.e = nn.Linear(128, 1, bias=False)
 
-    def forward(self, attention_hidden_state, memory, processed_memory, attention_weights):
-        processed_query = self.query_dense(attention_hidden_state)
+    def forward(self, query, memory, processed_memory, attention_weights):
+        processed_query = self.query_dense(query.unsqueeze(1))
 
         processed_attention_weights = self.location_conv(attention_weights)
         processed_attention_weights = processed_attention_weights.transpose(1, 2)
@@ -77,7 +77,7 @@ class Decoder(nn.Module):
 
         self.attention = Attention()
 
-        self.lstm = nn.LSTM(1024 + 512, 1024, num_layers=2)
+        self.lstm = nn.LSTM(256 + 512, 1024, num_layers=2)
 
         self.linear_proj = nn.Linear(1024 + 512, 80)
 
@@ -86,9 +86,16 @@ class Decoder(nn.Module):
     def forward(self, inputs, padded_mels):
         # prepend dummy mel frame
         padded_mels = torch.cat((torch.zeros((5, 80, 1)), padded_mels), dim=2)
-        print(padded_mels.size())
+
+        #
+        atn_hidden_state = inputs
+        atn_context = torch.zeros(inputs.size())
+        processed_atn_context = self.attention.memory_dense(atn_context)
+        atn_weights = torch.zeros(inputs.size())
+        cum_atn_weights = torch.zeros(inputs.size())
 
         # decoder loop
+        next_mel = []
         for decoder_step in range(padded_mels.size(2) - 1):
             # grab previous mel frame as decoder input
             prev_mel = padded_mels[:, :, decoder_step]
@@ -99,9 +106,15 @@ class Decoder(nn.Module):
             prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
 
             #
-            
+            atn_context, atn_weights = self.attention(atn_hidden_state, atn_context, processed_atn_context, atn_weights)
+            cum_atn_weights += atn_weights
 
-        return inputs
+            atn_hidden_state = self.lstm(torch.concat((prev_mel, atn_context), dim=-1))
+
+            next_mel += torch.concat((next_mel, atn_context), dim=-1).unsqueeze(-1)
+            print("Frame dims: " + str(next_mel.size()))
+
+        return torch.concat(next_mel, dim=-1)
 
 
 class Postnet(nn.Module):
