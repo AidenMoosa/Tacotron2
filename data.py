@@ -94,10 +94,10 @@ class PadCollate:
 
         sorted_texts = sorted(texts, reverse=True, key=len)  # annoyingly need list in (descending) order
         text_lengths = [len(text) for text in sorted_texts]
-        padded_texts = [self.pad_tensor(torch.cuda.LongTensor(text), text_lengths[0], dim=0) for text in sorted_texts]
+        padded_texts = [self.pad_tensor(torch.LongTensor(text), text_lengths[0], dim=0) for text in sorted_texts]
 
         max_mel_len = max(map(lambda mel: mel.shape[-1], mels))
-        padded_mels = [self.pad_tensor(torch.from_numpy(mel).float().cuda(), max_mel_len) for mel in mels]
+        padded_mels = [self.pad_tensor(torch.from_numpy(mel).float(), max_mel_len) for mel in mels]
 
         return torch.stack(padded_texts), torch.LongTensor(text_lengths), torch.stack(padded_mels)
 
