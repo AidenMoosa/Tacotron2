@@ -5,10 +5,10 @@ from torch.utils.data import Dataset
 import librosa
 
 
-
 # Find letter index from all_letters, e.g. "a" = 0
 def character_to_index(character):
     return all_characters.find(character)
+
 
 class LabelledMelDataset(Dataset):
     def __init__(self, root_dir):
@@ -54,7 +54,6 @@ class LabelledMelDataset(Dataset):
         self.paths = paths
         self.labels = labels
 
-# RENAME
     def label_to_list(self, label):
         return [all_characters.find(ch) for ch in label]
 
@@ -80,7 +79,7 @@ class LabelledMelDataset(Dataset):
 
 
 # ideas taken from https://discuss.pytorch.org/t/dataloader-for-various-length-of-data/6418/8
-class PadCollate():
+class PadCollate:
     def __init__(self):
         pass
 
@@ -95,9 +94,10 @@ class PadCollate():
 
         sorted_texts = sorted(texts, reverse=True, key=len)  # annoyingly need list in (descending) order
         text_lengths = [len(text) for text in sorted_texts]
-        padded_texts = [self.pad_tensor(torch.LongTensor(text), text_lengths[0], dim=0) for text in sorted_texts]
+        padded_texts = [self.pad_tensor(torch.cuda.LongTensor(text), text_lengths[0], dim=0) for text in sorted_texts]
 
         max_mel_len = max(map(lambda mel: mel.shape[-1], mels))
-        padded_mels = [self.pad_tensor(torch.from_numpy(mel).float(), max_mel_len) for mel in mels]
+        padded_mels = [self.pad_tensor(torch.from_numpy(mel).float().cuda(), max_mel_len) for mel in mels]
 
-        return torch.stack(padded_texts), text_lengths, torch.stack(padded_mels)
+        return torch.stack(padded_texts), torch.LongTensor(text_lengths), torch.stack(padded_mels)
+

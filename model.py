@@ -17,15 +17,19 @@ class Encoder(nn.Module):
         self.conv3 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2)
         self.conv3_bn = nn.BatchNorm1d(params.embedding_dim)
 
-        self.lstm = nn.LSTM(params.embedding_dim, int(params.embedding_dim / 2), batch_first=True, bidirectional=True)
+        self.lstm = nn.LSTM(params.embedding_dim, int(params.embedding_dim / 2),
+                            batch_first=True,
+                            bidirectional=True)
 
     def forward(self, embedded_inputs, input_lengths):
         inputs = F.dropout(F.relu(self.conv1_bn(self.conv1(embedded_inputs))), 0.5, self.training)
         inputs = F.dropout(F.relu(self.conv2_bn(self.conv2(inputs))), 0.5, self.training)
         inputs = F.dropout(F.relu(self.conv3_bn(self.conv3(inputs))), 0.5, self.training)
+        inputs = inputs.transpose(1, 2)
 
-        # idea to pack came from NVIDIA
-        inputs = nn.utils.rnn.pack_padded_sequence(inputs.transpose(1, 2), input_lengths, batch_first=True)
+        # idea to pack came from NVIDIA's implementation
+        input_lengths = input_lengths.cpu().numpy()
+        inputs = nn.utils.rnn.pack_padded_sequence(inputs, input_lengths, batch_first=True)
         self.lstm.flatten_parameters()
         outputs, _ = self.lstm(inputs)
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True)
@@ -47,7 +51,7 @@ class Attention(nn.Module):
 
         self.lstm_output_linear_proj = nn.Linear(1024, 128, bias=False)
 
-        self.location_conv = nn.Conv1d(1, 32, kernel_size=31, padding=15)
+        self.location_conv = nn.Conv1d(1, 32, kernel_size=31, padding=15, bias=False)
         self.location_dense = nn.Linear(32, 128, bias=False)
 
         self.e = nn.Linear(128, 1, bias=False)
@@ -55,18 +59,18 @@ class Attention(nn.Module):
     def forward(self, encoder_output, processed_encoder_output, lstm_output, attention_weights_cum):
         processed_lstm_output = self.lstm_output_linear_proj(lstm_output)
 
-        processed_attention_weights = self.location_conv(attention_weights_cum.unsqueeze(1))
+        attention_weights_cum = attention_weights_cum.unsqueeze(1)
+        processed_attention_weights = self.location_conv(attention_weights_cum)
         processed_attention_weights = processed_attention_weights.transpose(1, 2)
         processed_attention_weights = self.location_dense(processed_attention_weights)
 
-        energies = self.e(torch.tanh(torch.cat((processed_lstm_output, processed_attention_weights, processed_encoder_output), dim=1)))
+        energies = self.e(torch.tanh(processed_lstm_output + processed_attention_weights + processed_encoder_output))
         energies = energies.squeeze(-1)
 
         attention_weights = F.softmax(energies, dim=1)
-        #print(attention_weights.unsqueeze(1).size())
-        #print(processed_encoder_output.size())
-        attention_context = torch.bmm(attention_weights.unsqueeze(1), encoder_output)
-        attention_context = attention_context.squeeze(1)
+        attention_weights = attention_weights.unsqueeze(1)
+        attention_context = torch.bmm(attention_weights, encoder_output)
+        attention_weights = attention_weights.squeeze(1)
 
         return attention_context, attention_weights
 
@@ -87,10 +91,11 @@ class Decoder(nn.Module):
         self.stop_dense = nn.Linear(1024 + 512, 1)
 
     def forward(self, inputs, padded_mels):
+        # can do this before
         processed_encoder_output = self.attention.encoder_output_linear_proj(inputs)
-        lstm_output = torch.zeros((5, 256 + 512, 1024))
-        attention_weights = torch.zeros((5, padded_mels.size(-1)))
-        attention_weights_cum = torch.zeros((5, padded_mels.size(-1)))
+
+        #
+        attention_weights_cum = torch.zeros((5, inputs.size(1)))
         attention_context = torch.zeros((5, params.embedding_dim))
 
         # prepend dummy mel frame
@@ -107,18 +112,27 @@ class Decoder(nn.Module):
             prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
 
             #
-            attention_context, attention_weights = self.attention(inputs, processed_encoder_output, lstm_output, attention_weights_cum)
-            attention_weights_cum += attention_weights
+            lstm_input = torch.cat((prev_mel, attention_context), dim=-1).unsqueeze(1)
+            lstm_output, _ = self.lstm(lstm_input)
 
-            lstm_output = self.lstm(torch.concat((prev_mel, attention_weights), dim=-1))
+            #
+            attention_context, attention_weights = self.attention(inputs,
+                                                                  processed_encoder_output,
+                                                                  lstm_output,
+                                                                  attention_weights_cum)
+            attention_weights_cum = attention_weights_cum + attention_weights
 
-            decoder_output = torch.concat((prev_mel, attention_context), dim=-1)
+            # maybe wrong
+            decoder_output = torch.cat((lstm_output, attention_context), dim=-1)
+            attention_context = attention_context.squeeze(1)
 
             next_frame = self.linear_proj(decoder_output)
-            predicted_mel += next_frame
-            print("Frame dims: " + str(next_frame.size()))
+            next_frame = next_frame.squeeze(1)
+            predicted_mel.append(next_frame)
 
-        return torch.stack(predicted_mel)
+        mel_output = torch.stack(predicted_mel)
+        mel_output = mel_output.transpose(0, 1)
+        return mel_output
 
 
 class Postnet(nn.Module):
@@ -156,14 +170,17 @@ class Tacotron2(nn.Module):
         self.postnet = Postnet()
 
     def forward(self, padded_texts, text_lengths, padded_mels):
+        text_lengths = text_lengths.data
+
         embedded_inputs = self.embedding(padded_texts).transpose(1, 2)
-        print(embedded_inputs.size())
 
         encoder_outputs = self.encoder(embedded_inputs, text_lengths)
 
         decoder_outputs = self.decoder(encoder_outputs, padded_mels)
 
-        postnet_outputs = self.postnet(decoder_outputs)
-        postnet_outputs = torch.concat((decoder_outputs, postnet_outputs), dim=1)
+        postnet_outputs = self.postnet(decoder_outputs.transpose(1, 2))
+        postnet_outputs = postnet_outputs.transpose(1, 2)
+        postnet_outputs = postnet_outputs + decoder_outputs
+        postnet_outputs = postnet_outputs.transpose(1, 2)
 
         return postnet_outputs
