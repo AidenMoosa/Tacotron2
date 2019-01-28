@@ -1,6 +1,13 @@
+# code adapted from https://github.com/bkvogel/griffin_lim
+
+# Author: Brian K. Vogel
+# brian.vogel@gmail.com
+
 from pylab import *
 import numpy as np
 import audio_utilities
+from params import audio_out_path, mel_out_path
+from os.path import join
 
 filterbank = audio_utilities.make_mel_filterbank(125, 7600, 80, 513, 22050)
 
@@ -21,7 +28,7 @@ def save_mel_to_wav(mel_spectrogram):
         x_reconstruct = x_reconstruct / max_sample
 
     # Save the reconstructed signal to a WAV file.
-    audio_utilities.save_audio_to_file(x_reconstruct, 22050)
+    audio_utilities.save_audio_to_file(x_reconstruct, 22050, outfile=join(audio_out_path, 'out.wav'))
 
     # Save the spectrogram image also.
     clf()
@@ -32,4 +39,4 @@ def save_mel_to_wav(mel_spectrogram):
     title('Spectrogram used to reconstruct audio')
     xlabel('time index')
     ylabel('frequency bin index')
-    savefig('reconstruction_spectrogram.png', dpi=150)
+    savefig(join(mel_out_path, 'out.png'), dpi=150)

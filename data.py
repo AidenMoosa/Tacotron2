@@ -4,6 +4,8 @@ import torch
 from torch.utils.data import Dataset
 import librosa
 
+# TODO: change dataset to LJ
+
 
 # Find letter index from all_letters, e.g. "a" = 0
 def character_to_index(character):
@@ -11,48 +13,9 @@ def character_to_index(character):
 
 
 class LabelledMelDataset(Dataset):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, loader_fn):
+        self.paths, self.labels = loader_fn(root_dir)
         self.root_dir = root_dir
-
-        self.paths = []
-        self.labels = []
-
-        self.gather_labels()
-
-    def gather_labels(self):
-        paths = []
-        labels = []
-        for root, dirs, files in os.walk(self.root_dir, topdown=True):
-            for path in files:
-                if path.endswith('.txt'):
-                    with open(os.path.join(root, path)) as file:
-                        string = ''
-                        in_name = True
-
-                        while True:
-                            c = file.read(1)
-                            if not c:
-                                string = string.strip()
-                                labels.append(string)
-                                break
-
-                            if in_name:
-                                if c.isspace():
-                                    in_name = False
-                                    string = string.strip()
-                                    paths.append(os.path.join(root, string) + ".flac")
-                                    string = ''
-                            else:
-                                if c.isdigit():
-                                    in_name = True
-                                    string = string.strip()
-                                    labels.append(string)
-                                    string = ''
-
-                            string += c
-
-        self.paths = paths
-        self.labels = labels
 
     def label_to_list(self, label):
         return [all_characters.find(ch) for ch in label]
@@ -101,3 +64,41 @@ class PadCollate:
 
         return torch.stack(padded_texts), torch.LongTensor(text_lengths), torch.stack(padded_mels)
 
+
+class LibriSpeechLoader:
+    def __init__(self):
+        pass
+
+    def __call__(self, root_dir):
+        paths = []
+        labels = []
+        for root, dirs, files in os.walk(root_dir, topdown=True):
+            for path in files:
+                if path.endswith('.txt'):
+                    with open(os.path.join(root, path)) as file:
+                        string = ''
+                        in_name = True
+
+                        while True:
+                            c = file.read(1)
+                            if not c:
+                                string = string.strip()
+                                labels.append(string)
+                                break
+
+                            if in_name:
+                                if c.isspace():
+                                    in_name = False
+                                    string = string.strip()
+                                    paths.append(os.path.join(root, string) + ".flac")
+                                    string = ''
+                            else:
+                                if c.isdigit():
+                                    in_name = True
+                                    string = string.strip()
+                                    labels.append(string)
+                                    string = ''
+
+                            string += c
+
+        return paths, labels

@@ -1,21 +1,14 @@
+# code taken from https://github.com/bkvogel/griffin_lim
 
+# Author: Brian K. Vogel
+# brian.vogel@gmail.com
 
-
-import math
-import sys
-import time
-import numpy as np
 import wave
 import scipy
 import scipy.signal
 from pylab import *
 import array
-import os
-from os.path import expanduser
 import scipy.io.wavfile
-
-# Author: Brian K. Vogel
-# brian.vogel@gmail.com
 
 
 def hz_to_mel(f_hz):

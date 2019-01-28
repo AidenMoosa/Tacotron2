@@ -3,6 +3,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# TODO: implement data masking for padded inputs
+# TODO: add code for gate outputs
+# TODO: clean up CUDA code
+
 
 class Encoder(nn.Module):
     def __init__(self):

@@ -1,5 +1,5 @@
 import params
-from data import LabelledMelDataset, PadCollate
+from data import LabelledMelDataset, PadCollate, LibriSpeechLoader
 from model import Tacotron2
 import torch
 import numpy as np
@@ -13,9 +13,10 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 
-dataset = LabelledMelDataset('resources')
-pad_collate = PadCollate()
+dataset_loader = LibriSpeechLoader()
+dataset = LabelledMelDataset('resources/LibriSpeech', dataset_loader)
 
+pad_collate = PadCollate()
 data_loader = data.DataLoader(dataset,
                               batch_size=params.batch_size,
                               collate_fn=pad_collate,

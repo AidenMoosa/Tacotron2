@@ -11,3 +11,6 @@ weight_decay = 1e-6
 all_characters = string.printable
 n_characters = len(all_characters)
 embedding_dim = 512
+# output parameters
+audio_out_path = 'out/audio'
+mel_out_path = 'out/mel'
