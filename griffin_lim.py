@@ -12,8 +12,7 @@ from os.path import join
 filterbank = audio_utilities.make_mel_filterbank(125, 7600, 80, 513, 22050)
 
 
-def save_mel_to_wav(mel_spectrogram):
-    print(mel_spectrogram.size())
+def save_mel_to_wav(mel_spectrogram, filename='out'):
     mel_spectrogram = mel_spectrogram.detach().cpu().numpy()
 
     inverted_mel_to_linear_freq_spectrogram = np.dot(filterbank.T, mel_spectrogram)
@@ -28,7 +27,7 @@ def save_mel_to_wav(mel_spectrogram):
         x_reconstruct = x_reconstruct / max_sample
 
     # Save the reconstructed signal to a WAV file.
-    audio_utilities.save_audio_to_file(x_reconstruct, 22050, outfile=join(audio_out_path, 'out.wav'))
+    audio_utilities.save_audio_to_file(x_reconstruct, 22050, outfile=join(audio_out_path, filename + '.wav'))
 
     # Save the spectrogram image also.
     clf()
@@ -39,4 +38,4 @@ def save_mel_to_wav(mel_spectrogram):
     title('Spectrogram used to reconstruct audio')
     xlabel('time index')
     ylabel('frequency bin index')
-    savefig(join(mel_out_path, 'out.png'), dpi=150)
+    savefig(join(mel_out_path, filename + '.png'), dpi=150)

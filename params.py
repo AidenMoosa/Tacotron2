@@ -1,6 +1,8 @@
 import string
 
 # training params
+resume_from_checkpoint = False
+checkpoint_path = 'out/model/model.p'
 use_gpu = True
 epochs = 10
 batch_size = 5

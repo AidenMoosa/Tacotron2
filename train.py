@@ -8,6 +8,7 @@ from torch.utils import data
 import torch.nn as nn
 import griffin_lim
 
+
 seed = 42
 np.random.seed(seed)
 torch.manual_seed(seed)
@@ -32,9 +33,19 @@ optimiser = optim.Adam(tacotron2.parameters(),
 
 criterion = nn.MSELoss()
 
+start_epoch = 0
+loss = 0
+
+if params.resume_from_checkpoint:
+    checkpoint = torch.load(params.checkpoint_path)
+    tacotron2.load_state_dict(checkpoint['model_state_dict'])
+    optimiser.load_state_dict(checkpoint['optimizer_state_dict'])
+    start_epoch = checkpoint['epoch']
+    loss = checkpoint['loss']
+
 tacotron2.train()
 
-for _ in range(params.epochs):
+for epoch in range(start_epoch, params.epochs):
     for i, batch in enumerate(data_loader):
         tacotron2.zero_grad()
 
@@ -53,5 +64,16 @@ for _ in range(params.epochs):
         loss.backward()
         optimiser.step()
 
-        #griffin_lim.save_mel_to_wav(padded_mels[0])
-        #griffin_lim.save_mel_to_wav(y_pred[0])
+        if i % 20 == 0:
+            # checkpoint the model
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': tacotron2.state_dict(),
+                'optimizer_state_dict': optimiser.state_dict(),
+                'loss': loss},
+                params.checkpoint_path)
+
+            griffin_lim.save_mel_to_wav(padded_mels[0], 'iter ' + str(i) + ' reference')
+            griffin_lim.save_mel_to_wav(y_pred[0], 'iter ' + str(i))
+
+
