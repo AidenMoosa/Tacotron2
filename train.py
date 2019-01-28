@@ -1,5 +1,5 @@
 import params
-from data import LabelledMelDataset, PadCollate, LibriSpeechLoader, LJSpeechLoader
+from data import LabelledMelDataset, PadCollate, LJSpeechLoader
 from model import Tacotron2
 import torch
 import numpy as np
@@ -22,7 +22,9 @@ data_loader = data.DataLoader(dataset,
                               collate_fn=pad_collate,
                               drop_last=True)
 
-tacotron2 = Tacotron2().cuda()
+tacotron2 = Tacotron2()
+if params.use_gpu:
+    tacotron2 = tacotron2.cuda()
 
 optimiser = optim.Adam(tacotron2.parameters(),
                        lr=params.learning_rate,
@@ -44,11 +46,12 @@ for _ in range(params.epochs):
             padded_mels = padded_mels.cuda().float()
 
         y_pred = tacotron2(padded_texts, text_lengths, padded_mels)
-        #griffin_lim.save_mel_to_wav(padded_mels[0])
-        griffin_lim.save_mel_to_wav(y_pred[0])
         loss = criterion(y_pred, padded_mels)
 
-        print("batch #" + str(i) + ": loss = " + str(loss.item()))
+        print("batch #" + str(i + 1) + ": loss = " + str(loss.item()))
 
         loss.backward()
         optimiser.step()
+
+        #griffin_lim.save_mel_to_wav(padded_mels[0])
+        #griffin_lim.save_mel_to_wav(y_pred[0])

@@ -4,8 +4,6 @@ import torch
 from torch.utils.data import Dataset
 import librosa
 
-# TODO: change dataset to LJ
-
 
 # Find letter index from all_letters, e.g. "a" = 0
 def character_to_index(character):
@@ -101,6 +99,7 @@ class LibriSpeechLoader:
                             string += c
 
         return paths, labels
+
 
 class LJSpeechLoader:
     def __init__(self):

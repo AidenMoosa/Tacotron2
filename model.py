@@ -64,7 +64,7 @@ class Attention(nn.Module):
         processed_lstm_output = self.lstm_output_linear_proj(lstm_output)
 
         attention_weights_cum = attention_weights_cum.unsqueeze(1)
-        processed_attention_weights = self.location_conv(attention_weights_cum.cuda())
+        processed_attention_weights = self.location_conv(attention_weights_cum)
         processed_attention_weights = processed_attention_weights.transpose(1, 2)
         processed_attention_weights = self.location_dense(processed_attention_weights)
 
@@ -99,11 +99,11 @@ class Decoder(nn.Module):
         processed_encoder_output = self.attention.encoder_output_linear_proj(inputs)
 
         #
-        attention_weights_cum = torch.zeros((params.batch_size, inputs.size(1)))
-        attention_context = torch.zeros((params.batch_size, params.embedding_dim))
+        attention_weights_cum = padded_mels.new_zeros((params.batch_size, inputs.size(1)))
+        attention_context = padded_mels.new_zeros((params.batch_size, params.embedding_dim))
 
         # prepend dummy mel frame
-        padded_mels = torch.cat((torch.zeros((params.batch_size, 80, 1)).cuda(), padded_mels), dim=-1)
+        padded_mels = torch.cat((padded_mels.new_zeros((params.batch_size, 80, 1)), padded_mels), dim=-1)
 
         # decoder loop
         predicted_mel = []
@@ -116,7 +116,7 @@ class Decoder(nn.Module):
             prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
 
             #
-            lstm_input = torch.cat((prev_mel, attention_context.cuda()), dim=-1).unsqueeze(1)
+            lstm_input = torch.cat((prev_mel, attention_context), dim=-1).unsqueeze(1)
             lstm_output, _ = self.lstm(lstm_input)
 
             #
@@ -124,7 +124,7 @@ class Decoder(nn.Module):
                                                                   processed_encoder_output,
                                                                   lstm_output,
                                                                   attention_weights_cum)
-            attention_weights_cum = attention_weights_cum.cuda() + attention_weights.cuda()
+            attention_weights_cum = attention_weights_cum + attention_weights
 
             # maybe wrong
             decoder_output = torch.cat((lstm_output, attention_context), dim=-1)

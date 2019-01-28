@@ -3,7 +3,7 @@ import string
 # training params
 use_gpu = True
 epochs = 10
-batch_size = 2
+batch_size = 5
 # optimiser parameters
 learning_rate = 1e-3
 weight_decay = 1e-6
