@@ -3,6 +3,8 @@ from params import all_characters, n_characters
 import torch
 from torch.utils.data import Dataset
 import librosa
+from audio_utilities import dynamic_range_compression
+import numpy as np
 
 
 # Find letter index from all_letters, e.g. "a" = 0
@@ -20,12 +22,19 @@ class LabelledMelDataset(Dataset):
 
     def audiopath_to_mel(self, path):
         y, sr = librosa.load(path)
+
+        # audio already normalised but just in case
+        assert(np.min(y) >= -1)
+        assert(np.max(y) <= 1)
+
         mel = librosa.feature.melspectrogram(y, sr,
                                              n_fft=1024,
                                              hop_length=256,
                                              n_mels=80,
                                              fmin=125,
                                              fmax=7600)
+
+        mel = dynamic_range_compression(mel)
 
         return mel
 
@@ -51,16 +60,26 @@ class PadCollate:
         return torch.cat([tensor, torch.zeros(pad_shape, dtype=tensor.dtype)], dim=dim)
 
     def __call__(self, batch):
-        texts, mels = zip(*batch)
+        # sort batch into descending text length order
+        sorted_batch = sorted(batch, reverse=True, key=lambda text_mel: len(text_mel[0]))
 
-        sorted_texts = sorted(texts, reverse=True, key=len)  # annoyingly need list in (descending) order
-        text_lengths = [len(text) for text in sorted_texts]
-        padded_texts = [self.pad_tensor(torch.LongTensor(text), text_lengths[0], dim=0) for text in sorted_texts]
+        # extract separate lists from (text, mel) pairs
+        texts, mels = zip(*sorted_batch)
 
-        max_mel_len = max(map(lambda mel: mel.shape[-1], mels))
-        padded_mels = [self.pad_tensor(torch.from_numpy(mel).float(), max_mel_len) for mel in mels]
+        text_lengths = [len(text) for text in texts]
+        max_text_length = max(text_lengths)
+        padded_texts = [self.pad_tensor(torch.LongTensor(text), max_text_length, dim=0) for text in texts]
 
-        return torch.stack(padded_texts), torch.LongTensor(text_lengths), torch.stack(padded_mels)
+        mel_lengths = [mel.shape[-1] for mel in mels]
+        max_mel_length = max(mel_lengths)
+        padded_mels = [self.pad_tensor(torch.from_numpy(mel).float(), max_mel_length) for mel in mels]
+
+        padded_stop_tokens = [mel.new_zeros(max_mel_length) for mel in padded_mels]
+        for i, l in enumerate(mel_lengths):
+            padded_stop_tokens[i][mel_lengths[i]:] = 1
+
+        return torch.stack(padded_texts), torch.LongTensor(text_lengths), \
+               torch.stack(padded_mels), torch.stack(padded_stop_tokens)
 
 
 class LibriSpeechLoader:

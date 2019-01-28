@@ -19,7 +19,7 @@ def save_mel_to_wav(mel_spectrogram, filename='out'):
     stft_modified = inverted_mel_to_linear_freq_spectrogram.T
     # Use the Griffin&Lim algorithm to reconstruct an audio signal from the
     # magnitude spectrogram.
-    x_reconstruct = audio_utilities.reconstruct_signal_griffin_lim(stft_modified, 1024, 256, 300)
+    x_reconstruct = audio_utilities.reconstruct_signal_griffin_lim(stft_modified, 1024, 256, 100)
 
     # The output signal must be in the range [-1, 1], otherwise we need to clip or normalize.
     max_sample = np.max(abs(x_reconstruct))

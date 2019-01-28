@@ -124,11 +124,11 @@ def make_mel_filterbank(min_freq_hz, max_freq_hz, mel_bin_count,
     mels_start = min_mels - mels_per_bin
     hz_start = mel_to_hz(mels_start)
     fft_bin_start = hz_to_fft_bin(hz_start, sample_rate_hz, linear_bin_count)
-    #print('fft_bin_start: ', fft_bin_start)
+    # print('fft_bin_start: ', fft_bin_start)
     mels_end = max_mels + mels_per_bin
     hz_stop = mel_to_hz(mels_end)
     fft_bin_stop = hz_to_fft_bin(hz_stop, sample_rate_hz, linear_bin_count)
-    #print('fft_bin_stop: ', fft_bin_stop)
+    # print('fft_bin_stop: ', fft_bin_stop)
     # Map each center frequency to the closest fft bin index.
     linear_bin_indices = np.array([hz_to_fft_bin(f_hz, sample_rate_hz, linear_bin_count) for f_hz in center_frequencies_hz])
     # Create filterbank matrix.
@@ -284,7 +284,7 @@ def reconstruct_signal_griffin_lim(magnitude_spectrogram, fft_size, hopsamp, ite
         prev_x = x_reconstruct
         x_reconstruct = istft_for_reconstruction(proposal_spectrogram, fft_size, hopsamp)
         diff = sqrt(sum((x_reconstruct - prev_x)**2)/x_reconstruct.size)
-        print('Reconstruction iteration: {}/{} RMSE: {} '.format(iterations - n, iterations, diff))
+        # print('Reconstruction iteration: {}/{} RMSE: {} '.format(iterations - n, iterations, diff))
     return x_reconstruct
 
 
@@ -308,3 +308,25 @@ def save_audio_to_file(x, sample_rate, outfile='out.wav'):
     f.setparams((1, 2, sample_rate, 0, "NONE", "Uncompressed"))
     f.writeframes(data.tostring())
     f.close()
+
+import torch
+
+
+def dynamic_range_compression(x, C=1, clip_val=1e-5):
+    """
+    PARAMS
+    ------
+    C: compression factor
+    """
+    #return np.log(np.clip(x, a_min=clip_val, a_max=None) * C)
+    return x
+
+
+def dynamic_range_decompression(x, C=1):
+    """
+    PARAMS
+    ------
+    C: compression factor used to compress
+    """
+    #return torch.exp(x) / C
+    return x

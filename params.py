@@ -1,11 +1,13 @@
 import string
 
 # training params
+should_checkpoint = False
 resume_from_checkpoint = False
 checkpoint_path = 'out/model/model.p'
 use_gpu = True
 epochs = 10
-batch_size = 5
+batch_size = 8
+effective_batch_size = 64
 # optimiser parameters
 learning_rate = 1e-3
 weight_decay = 1e-6
