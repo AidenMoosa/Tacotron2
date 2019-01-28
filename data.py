@@ -70,8 +70,7 @@ class LibriSpeechLoader:
         pass
 
     def __call__(self, root_dir):
-        paths = []
-        labels = []
+        paths, labels = [], []
         for root, dirs, files in os.walk(root_dir, topdown=True):
             for path in files:
                 if path.endswith('.txt'):
@@ -100,5 +99,19 @@ class LibriSpeechLoader:
                                     string = ''
 
                             string += c
+
+        return paths, labels
+
+class LJSpeechLoader:
+    def __init__(self):
+        pass
+
+    def __call__(self, root_dir):
+        paths, labels = [], []
+        with open(os.path.join(root_dir, "metadata.csv"), encoding='utf-8') as metadata:
+            for line in metadata:
+                path, _, label = line.split('|')
+                paths.append(os.path.join(root_dir, 'wavs', path + '.wav'))
+                labels.append(label)
 
         return paths, labels
