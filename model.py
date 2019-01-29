@@ -118,7 +118,7 @@ class Decoder(nn.Module):
 
         self.lstm = nn.LSTM(256 + 512, 1024, num_layers=2)
 
-        self.linear_proj = nn.Linear(1024 + 512, 80, bias=False)
+        self.linear_proj = nn.Linear(1024 + 512, 80)
         torch.nn.init.xavier_uniform_(
             self.linear_proj.weight,
             gain=torch.nn.init.calculate_gain('linear'))
@@ -228,6 +228,8 @@ class Tacotron2(nn.Module):
         super(Tacotron2, self).__init__()
 
         self.embedding = nn.Embedding(params.n_characters, params.embedding_dim)
+        # experimental
+        torch.nn.init.xavier_normal_(self.embedding.weight)
         self.encoder = Encoder()
         self.decoder = Decoder()
         self.postnet = Postnet()

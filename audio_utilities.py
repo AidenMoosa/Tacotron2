@@ -9,7 +9,7 @@ import scipy.signal
 from pylab import *
 import array
 import scipy.io.wavfile
-
+import librosa
 
 def hz_to_mel(f_hz):
     """Convert Hz to mel scale.
@@ -72,106 +72,6 @@ def hz_to_fft_bin(f_hz, sample_rate_hz, fft_size):
     if fft_bin >= fft_size:
         fft_bin = fft_size-1
     return fft_bin
-
-
-def make_mel_filterbank(min_freq_hz, max_freq_hz, mel_bin_count,
-                        linear_bin_count, sample_rate_hz):
-    """Create a mel filterbank matrix.
-
-    Create and return a mel filterbank matrix `filterbank` of shape (`mel_bin_count`,
-    `linear_bin_couont`). The `filterbank` matrix can be used to transform a
-    (linear scale) spectrum or spectrogram into a mel scale spectrum or
-    spectrogram as follows:
-
-    `mel_scale_spectrum` = `filterbank`*'linear_scale_spectrum'
-
-    where linear_scale_spectrum' is a shape (`linear_bin_count`, `m`) and
-    `mel_scale_spectrum` is shape ('mel_bin_count', `m`) where `m` is the number
-    of spectral time slices.
-
-    Likewise, the reverse-direction transform can be performed as:
-
-    'linear_scale_spectrum' = filterbank.T`*`mel_scale_spectrum`
-
-    Note that the process of converting to mel scale and then back to linear
-    scale is lossy.
-
-    This function computes the mel-spaced filters such that each filter is triangular
-    (in linear frequency) with response 1 at the center frequency and decreases linearly
-    to 0 upon reaching an adjacent filter's center frequency. Note that any two adjacent
-    filters will overlap having a response of 0.5 at the mean frequency of their
-    respective center frequencies.
-
-    Args:
-        min_freq_hz (float): The frequency in Hz corresponding to the lowest
-            mel scale bin.
-        max_freq_hz (flloat): The frequency in Hz corresponding to the highest
-            mel scale bin.
-        mel_bin_count (int): The number of mel scale bins.
-        linear_bin_count (int): The number of linear scale (fft) bins.
-        sample_rate_hz (float): The sample rate in Hz.
-
-    Returns:
-        The mel filterbank matrix as an 2-dim Numpy array.
-    """
-    min_mels = hz_to_mel(min_freq_hz)
-    max_mels = hz_to_mel(max_freq_hz)
-    # Create mel_bin_count linearly spaced values between these extreme mel values.
-    mel_lin_spaced = np.linspace(min_mels, max_mels, num=mel_bin_count)
-    # Map each of these mel values back into linear frequency (Hz).
-    center_frequencies_hz = np.array([mel_to_hz(n) for n in mel_lin_spaced])
-    mels_per_bin = float(max_mels - min_mels)/float(mel_bin_count - 1)
-    mels_start = min_mels - mels_per_bin
-    hz_start = mel_to_hz(mels_start)
-    fft_bin_start = hz_to_fft_bin(hz_start, sample_rate_hz, linear_bin_count)
-    # print('fft_bin_start: ', fft_bin_start)
-    mels_end = max_mels + mels_per_bin
-    hz_stop = mel_to_hz(mels_end)
-    fft_bin_stop = hz_to_fft_bin(hz_stop, sample_rate_hz, linear_bin_count)
-    # print('fft_bin_stop: ', fft_bin_stop)
-    # Map each center frequency to the closest fft bin index.
-    linear_bin_indices = np.array([hz_to_fft_bin(f_hz, sample_rate_hz, linear_bin_count) for f_hz in center_frequencies_hz])
-    # Create filterbank matrix.
-    filterbank = np.zeros((mel_bin_count, linear_bin_count))
-    for mel_bin in range(mel_bin_count):
-        center_freq_linear_bin = linear_bin_indices[mel_bin]
-        # Create a triangular filter having the current center freq.
-        # The filter will start with 0 response at left_bin (if it exists)
-        # and ramp up to 1.0 at center_freq_linear_bin, and then ramp
-        # back down to 0 response at right_bin (if it exists).
-
-        # Create the left side of the triangular filter that ramps up
-        # from 0 to a response of 1 at the center frequency.
-        if center_freq_linear_bin > 1:
-            # It is possible to create the left triangular filter.
-            if mel_bin == 0:
-                # Since this is the first center frequency, the left side
-                # must start ramping up from linear bin 0 or 1 mel bin before the center freq.
-                left_bin = max(0, fft_bin_start)
-            else:
-                # Start ramping up from the previous center frequency bin.
-                left_bin = linear_bin_indices[mel_bin - 1]
-            for f_bin in range(left_bin, center_freq_linear_bin+1):
-                if (center_freq_linear_bin - left_bin) > 0:
-                    response = float(f_bin - left_bin)/float(center_freq_linear_bin - left_bin)
-                    filterbank[mel_bin, f_bin] = response
-        # Create the right side of the triangular filter that ramps down
-        # from 1 to 0.
-        if center_freq_linear_bin < linear_bin_count-2:
-            # It is possible to create the right triangular filter.
-            if mel_bin == mel_bin_count - 1:
-                # Since this is the last mel bin, we must ramp down to response of 0
-                # at the last linear freq bin.
-                right_bin = min(linear_bin_count - 1, fft_bin_stop)
-            else:
-                right_bin = linear_bin_indices[mel_bin + 1]
-            for f_bin in range(center_freq_linear_bin, right_bin+1):
-                if (right_bin - center_freq_linear_bin) > 0:
-                    response = float(right_bin - f_bin)/float(right_bin - center_freq_linear_bin)
-                    filterbank[mel_bin, f_bin] = response
-        filterbank[mel_bin, center_freq_linear_bin] = 1.0
-
-    return  filterbank
 
 
 def stft_for_reconstruction(x, fft_size, hopsamp):
@@ -287,7 +187,6 @@ def reconstruct_signal_griffin_lim(magnitude_spectrogram, fft_size, hopsamp, ite
         # print('Reconstruction iteration: {}/{} RMSE: {} '.format(iterations - n, iterations, diff))
     return x_reconstruct
 
-
 def save_audio_to_file(x, sample_rate, outfile='out.wav'):
     """Save a mono signal to a file.
 
@@ -299,34 +198,23 @@ def save_audio_to_file(x, sample_rate, outfile='out.wav'):
     """
     x_max = np.max(abs(x))
     assert x_max <= 1.0, 'Input audio value is out of range. Should be in the range [-1.0, 1.0].'
-    x = x*32767.0
+    x /= x_max
+    x *= 32767.0
+
     data = array.array('h')
     for i in range(len(x)):
         cur_samp = int(round(x[i]))
         data.append(cur_samp)
+
     f = wave.open(outfile, 'w')
     f.setparams((1, 2, sample_rate, 0, "NONE", "Uncompressed"))
     f.writeframes(data.tostring())
     f.close()
 
-import torch
+
+def dynamic_range_compression(mel, compression_factor=2):
+    return np.log(np.clip(mel, a_min=0.01, a_max=None) * compression_factor)
 
 
-def dynamic_range_compression(x, C=1, clip_val=1e-5):
-    """
-    PARAMS
-    ------
-    C: compression factor
-    """
-    #return np.log(np.clip(x, a_min=clip_val, a_max=None) * C)
-    return x
-
-
-def dynamic_range_decompression(x, C=1):
-    """
-    PARAMS
-    ------
-    C: compression factor used to compress
-    """
-    #return torch.exp(x) / C
-    return x
+def dynamic_range_decompression(mel, compression_factor=2):
+    return np.exp(mel) / compression_factor

@@ -1,15 +1,12 @@
 import os
-from params import all_characters, n_characters
+import params
 import torch
 from torch.utils.data import Dataset
 import librosa
 from audio_utilities import dynamic_range_compression
 import numpy as np
 
-
-# Find letter index from all_letters, e.g. "a" = 0
-def character_to_index(character):
-    return all_characters.find(character)
+character_to_index = {ch: i for i, ch in enumerate(params.all_characters)}
 
 
 class LabelledMelDataset(Dataset):
@@ -17,26 +14,29 @@ class LabelledMelDataset(Dataset):
         self.paths, self.labels = loader_fn(root_dir)
         self.root_dir = root_dir
 
+        self.mel_filterbank = librosa.filters.mel(sr=22050, n_fft=params.n_fft, n_mels=params.n_mel_channels,
+                                                  fmin=params.f_min, fmax=params.f_max)
+
     def label_to_list(self, label):
-        return [all_characters.find(ch) for ch in label]
+        return [character_to_index[ch] for ch in label]
 
     def audiopath_to_mel(self, path):
         y, sr = librosa.load(path)
+
+        # ensure sampling rate is the same
+        assert(sr == params.sampling_rate)
 
         # audio already normalised but just in case
         assert(np.min(y) >= -1)
         assert(np.max(y) <= 1)
 
-        mel = librosa.feature.melspectrogram(y, sr,
-                                             n_fft=1024,
-                                             hop_length=256,
-                                             n_mels=80,
-                                             fmin=125,
-                                             fmax=7600)
+        stft = librosa.stft(y, n_fft=params.n_fft)
+        stft_mag = np.absolute(stft)
+        mel = np.dot(self.mel_filterbank, stft_mag)
 
         mel = dynamic_range_compression(mel)
 
-        return mel
+        return mel.real
 
     def __getitem__(self, idx):
         text = self.label_to_list(self.labels[idx])
