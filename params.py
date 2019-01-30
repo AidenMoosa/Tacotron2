@@ -1,10 +1,12 @@
 import string
 
 # training params
-should_checkpoint = False
+inference = False
+inference_text = 'wwwwwwwwwwwwwwwwwwwwwwwwwwwwwww'
+should_checkpoint = True
 resume_from_checkpoint = False
 checkpoint_path = 'out/model/model.p'
-checkpoint_skip = 1
+checkpoint_skip = 16
 use_gpu = True
 epochs = 10
 batch_size = 8

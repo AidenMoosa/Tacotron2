@@ -10,19 +10,19 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
 
-        self.conv1 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2)
+        self.conv1 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2, bias=True)
         torch.nn.init.xavier_uniform_(
             self.conv1.weight,
             gain=torch.nn.init.calculate_gain('relu'))
         self.conv1_bn = nn.BatchNorm1d(params.embedding_dim)
 
-        self.conv2 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2, bias=True)
         torch.nn.init.xavier_uniform_(
             self.conv2.weight,
             gain=torch.nn.init.calculate_gain('relu'))
         self.conv2_bn = nn.BatchNorm1d(params.embedding_dim)
 
-        self.conv3 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2)
+        self.conv3 = nn.Conv1d(params.embedding_dim, params.embedding_dim, kernel_size=5, padding=2, bias=True)
         torch.nn.init.xavier_uniform_(
             self.conv3.weight,
             gain=torch.nn.init.calculate_gain('relu'))
@@ -44,6 +44,17 @@ class Encoder(nn.Module):
         self.lstm.flatten_parameters()
         outputs, _ = self.lstm(inputs)
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs, batch_first=True)
+
+        return outputs
+
+    def inference(self, embedded_input):
+        inputs = F.dropout(F.relu(self.conv1_bn(self.conv1(embedded_input))), 0.5, self.training)
+        inputs = F.dropout(F.relu(self.conv2_bn(self.conv2(inputs))), 0.5, self.training)
+        inputs = F.dropout(F.relu(self.conv3_bn(self.conv3(inputs))), 0.5, self.training)
+        inputs = inputs.transpose(1, 2)
+
+        self.lstm.flatten_parameters()
+        outputs, _ = self.lstm(inputs)
 
         return outputs
 
@@ -141,7 +152,7 @@ class Decoder(nn.Module):
 
         # decoder loop
         predicted_mel, stop_tokens = [], []
-        for decoder_step in range(padded_mels.size(2) - 1):
+        for decoder_step in range(padded_mels.size(-1) - 1):
             # grab previous mel frame as decoder input
             prev_mel = padded_mels[:, :, decoder_step]
 
@@ -169,7 +180,8 @@ class Decoder(nn.Module):
             predicted_mel.append(next_frame)
 
             # stop token prediction
-            stop_token = torch.sigmoid(self.stop_dense(decoder_output))
+            # stop_token = torch.sigmoid(self.stop_dense(decoder_output))
+            stop_token = self.stop_dense(decoder_output)
             stop_token = stop_token.squeeze(-1)
             stop_token = stop_token.squeeze(-1)
             stop_tokens.append(stop_token)
@@ -182,32 +194,84 @@ class Decoder(nn.Module):
 
         return mel_output, stop_tokens_t
 
+    def inference(self, encoder_output):
+        # can do this before
+        processed_encoder_output = self.attention.encoder_output_linear_proj(encoder_output)
+
+        #
+        attention_weights_cum = encoder_output.new_zeros((encoder_output.size(0), encoder_output.size(1)))
+        attention_context = encoder_output.new_zeros((encoder_output.size(0), params.embedding_dim))
+
+        # prepend dummy mel frame
+        prev_mel = encoder_output.new_zeros((encoder_output.size(0), 80))
+
+        # decoder loop
+        predicted_mel = []
+        decoder_steps = 0
+        while True:
+            # convert mel frame into model-readable format
+            prev_mel = F.dropout(F.relu(self.prenet_dense1(prev_mel)), p=0.5)
+            prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
+
+            #
+            lstm_input = torch.cat((prev_mel, attention_context), dim=-1).unsqueeze(1)
+            lstm_output, _ = self.lstm(lstm_input)
+
+            #
+            attention_context, attention_weights = self.attention(encoder_output,
+                                                                  processed_encoder_output,
+                                                                  lstm_output,
+                                                                  attention_weights_cum)
+            attention_weights_cum = attention_weights_cum + attention_weights
+
+            #
+            decoder_output = torch.cat((lstm_output, attention_context), dim=-1)
+            attention_context = attention_context.squeeze(1)
+
+            next_frame = self.linear_proj(decoder_output)
+            next_frame = next_frame.squeeze(1)
+            predicted_mel.append(next_frame)
+            prev_mel = next_frame
+
+            # stop token prediction
+            # stop_token = torch.sigmoid(self.stop_dense(decoder_output))
+            stop_token = self.stop_dense(decoder_output)
+            print(stop_token.data[0, 0, 0])
+            decoder_steps = decoder_steps + 1
+            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500:
+                break
+
+        mel_output = torch.stack(predicted_mel)
+        mel_output = mel_output.transpose(0, 1)
+
+        return mel_output
+
 
 class Postnet(nn.Module):
     def __init__(self):
         super(Postnet, self).__init__()
 
-        self.postnet_conv1 = nn.Conv1d(80, 512, kernel_size=5, padding=2)
+        self.postnet_conv1 = nn.Conv1d(80, 512, kernel_size=5, padding=2, bias=False)
         torch.nn.init.xavier_uniform_(
             self.postnet_conv1.weight,
             gain=torch.nn.init.calculate_gain('tanh'))
         self.postnet_conv1_bn = nn.BatchNorm1d(512)
-        self.postnet_conv2 = nn.Conv1d(512, 512, kernel_size=5, padding=2)
+        self.postnet_conv2 = nn.Conv1d(512, 512, kernel_size=5, padding=2, bias=False)
         torch.nn.init.xavier_uniform_(
             self.postnet_conv2.weight,
             gain=torch.nn.init.calculate_gain('tanh'))
         self.postnet_conv2_bn = nn.BatchNorm1d(512)
-        self.postnet_conv3 = nn.Conv1d(512, 512, kernel_size=5, padding=2)
+        self.postnet_conv3 = nn.Conv1d(512, 512, kernel_size=5, padding=2, bias=False)
         torch.nn.init.xavier_uniform_(
             self.postnet_conv3.weight,
             gain=torch.nn.init.calculate_gain('tanh'))
         self.postnet_conv3_bn = nn.BatchNorm1d(512)
-        self.postnet_conv4 = nn.Conv1d(512, 512, kernel_size=5, padding=2)
+        self.postnet_conv4 = nn.Conv1d(512, 512, kernel_size=5, padding=2, bias=False)
         torch.nn.init.xavier_uniform_(
             self.postnet_conv4.weight,
             gain=torch.nn.init.calculate_gain('tanh'))
         self.postnet_conv4_bn = nn.BatchNorm1d(512)
-        self.postnet_conv5 = nn.Conv1d(512, 80, kernel_size=5, padding=2)
+        self.postnet_conv5 = nn.Conv1d(512, 80, kernel_size=5, padding=2, bias=False)
         torch.nn.init.xavier_uniform_(
             self.postnet_conv5.weight,
             gain=torch.nn.init.calculate_gain('linear'))
@@ -249,3 +313,20 @@ class Tacotron2(nn.Module):
         postnet_outputs = postnet_outputs + decoder_outputs
 
         return decoder_outputs, postnet_outputs, stop_tokens
+
+    def inference(self, text):
+        text = text.unsqueeze(1)
+
+        embedded_inputs = self.embedding(text)
+        embedded_inputs = embedded_inputs.transpose(1, 2)
+
+        encoder_outputs = self.encoder.inference(embedded_inputs)
+        encoder_outputs = encoder_outputs.transpose(0, 1)
+
+        decoder_outputs = self.decoder.inference(encoder_outputs)
+        decoder_outputs = decoder_outputs.transpose(1, 2)
+
+        postnet_outputs = self.postnet(decoder_outputs)
+        postnet_outputs = postnet_outputs + decoder_outputs
+
+        return decoder_outputs, postnet_outputs

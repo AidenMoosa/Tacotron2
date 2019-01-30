@@ -5,8 +5,13 @@ from torch.utils.data import Dataset
 import librosa
 from audio_utilities import dynamic_range_compression
 import numpy as np
+from unidecode import unidecode
 
 character_to_index = {ch: i for i, ch in enumerate(params.all_characters)}
+
+
+def text_to_tensor(label):
+    return torch.LongTensor([character_to_index[unidecode(ch)] for ch in label])
 
 
 class LabelledMelDataset(Dataset):
@@ -18,7 +23,7 @@ class LabelledMelDataset(Dataset):
                                                   fmin=params.f_min, fmax=params.f_max)
 
     def label_to_list(self, label):
-        return [character_to_index[ch] for ch in label]
+        return [character_to_index[unidecode(ch)] for ch in label]
 
     def audiopath_to_mel(self, path):
         y, sr = librosa.load(path)

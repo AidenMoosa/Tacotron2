@@ -212,9 +212,9 @@ def save_audio_to_file(x, sample_rate, outfile='out.wav'):
     f.close()
 
 
-def dynamic_range_compression(mel, compression_factor=2):
+def dynamic_range_compression(mel, compression_factor=100):
     return np.log(np.clip(mel, a_min=0.01, a_max=None) * compression_factor)
 
 
-def dynamic_range_decompression(mel, compression_factor=2):
+def dynamic_range_decompression(mel, compression_factor=100):
     return np.exp(mel) / compression_factor
