@@ -84,7 +84,8 @@ class PadCollate:
             padded_stop_tokens[i][mel_lengths[i]:] = 1
 
         return torch.stack(padded_texts), torch.LongTensor(text_lengths), \
-               torch.stack(padded_mels), torch.stack(padded_stop_tokens)
+            torch.stack(padded_mels), torch.LongTensor(mel_lengths),\
+            torch.stack(padded_stop_tokens)
 
 
 class LibriSpeechLoader:

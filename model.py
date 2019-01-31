@@ -180,7 +180,6 @@ class Decoder(nn.Module):
             predicted_mel.append(next_frame)
 
             # stop token prediction
-            # stop_token = torch.sigmoid(self.stop_dense(decoder_output))
             stop_token = self.stop_dense(decoder_output)
             stop_token = stop_token.squeeze(-1)
             stop_token = stop_token.squeeze(-1)
@@ -234,11 +233,10 @@ class Decoder(nn.Module):
             prev_mel = next_frame
 
             # stop token prediction
-            # stop_token = torch.sigmoid(self.stop_dense(decoder_output))
-            stop_token = self.stop_dense(decoder_output)
+            stop_token = torch.sigmoid(self.stop_dense(decoder_output))
             print(stop_token.data[0, 0, 0])
             decoder_steps = decoder_steps + 1
-            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500:
+            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 5000:
                 break
 
         mel_output = torch.stack(predicted_mel)

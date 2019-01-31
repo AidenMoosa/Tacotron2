@@ -8,6 +8,7 @@ from torch.utils import data
 import torch.nn as nn
 import griffin_lim
 from audio_utilities import dynamic_range_decompression
+import sys
 
 if __name__ == '__main__':
     seed = 42
@@ -66,27 +67,38 @@ if __name__ == '__main__':
         griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()), 'inference')
         griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference post')
 
+        sys.exit()
+
     for epoch in range(start_epoch, params.epochs):
+        # TODO: fix so that batch loader remembers what it already chose in the case of checkpointing (may not be needed when using better GPUs)
         for i, batch in enumerate(data_loader):
-            padded_texts, text_lengths, padded_mels, padded_stop_tokens = batch
+            padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = batch
 
             if params.use_gpu:
                 padded_texts = padded_texts.cuda().long()
                 text_lengths = text_lengths.cuda().long()
                 padded_mels = padded_mels.cuda().float()
+                mel_lengths = mel_lengths.cuda().long()
                 padded_stop_tokens = padded_stop_tokens.cuda().float()
 
             padded_texts.requires_grad = False
             text_lengths.requires_grad = False
             padded_mels.requires_grad = False
+            mel_lengths.requires_grad = False
             padded_stop_tokens.requires_grad = False
 
             y_pred, y_pred_post, pred_stop_tokens = tacotron2(padded_texts, text_lengths, padded_mels)
+
+            for b in range(params.batch_size):
+                y_pred[b][mel_lengths[b]:] = 0
+                y_pred_post[b][mel_lengths[b]:] = 0
+                pred_stop_tokens[b][mel_lengths[b]:] = 1
+
             loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
                 criterion_stop(pred_stop_tokens, padded_stop_tokens)
             loss.backward()
 
-            print("batch #" + str(start_i + i + 1) + ": loss = " + str(loss.item()))
+            print("Batch #" + str(start_i + i + 1) + ": loss = " + str(loss.item()))
 
             if (start_i + i + 1) % (params.effective_batch_size / params.batch_size) == 0:
                 print("stepping backwards...")
@@ -105,10 +117,8 @@ if __name__ == '__main__':
                         params.checkpoint_path)
 
                 print("generating audio...")
-                griffin_lim.save_mel_to_wav(dynamic_range_decompression(padded_mels[0].cpu().detach()),
-                                            'iter ' + str(start_i + i) + ' reference')
-                griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()),
-                                            'iter ' + str(start_i + i))
-                griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()),
-                                            'iter ' + str(start_i + i) + 'post')
+                griffin_lim.save_mel_to_wav(dynamic_range_decompression(padded_mels[-1][:, :mel_lengths[-1]].cpu().detach()),
+                                            'Iteration ' + str(start_i + i + 1) + ' reference')
+                griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[-1][:, :mel_lengths[-1]].cpu().detach()),
+                                            'Iteration ' + str(start_i + i + 1) + ' post')
 

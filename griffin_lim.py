@@ -27,7 +27,6 @@ def save_mel_to_wav(mel_spectrogram, filename='out'):
 
     # The output signal must be in the range [-1, 1], otherwise we need to clip or normalize.
     max_sample = np.max(abs(x_reconstruct))
-    print(max_sample)
     if max_sample > 1.0:
         x_reconstruct = x_reconstruct / max_sample
 
@@ -42,4 +41,4 @@ def save_mel_to_wav(mel_spectrogram, filename='out'):
     title(filename + ' Spectrogram')
     xlabel('Frame')
     ylabel('Frequency Bin Index')
-    savefig(join(mel_out_path, filename + '.png'), dpi=150)
+    savefig(join(mel_out_path, filename + '.png'), dpi=128)

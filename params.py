@@ -2,9 +2,9 @@ import string
 
 # training params
 inference = False
-inference_text = 'wwwwwwwwwwwwwwwwwwwwwwwwwwwwwww'
+inference_text = 'aiden'
 should_checkpoint = True
-resume_from_checkpoint = False
+resume_from_checkpoint = True
 checkpoint_path = 'out/model/model.p'
 checkpoint_skip = 16
 use_gpu = True
