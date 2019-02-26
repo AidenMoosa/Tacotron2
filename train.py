@@ -70,7 +70,6 @@ if __name__ == '__main__':
         sys.exit()
 
     for epoch in range(start_epoch, params.epochs):
-        # TODO: fix so that batch loader remembers what it already chose in the case of checkpointing (may not be needed when using better GPUs)
         for i, batch in enumerate(data_loader):
             padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = batch
 
@@ -113,7 +112,7 @@ if __name__ == '__main__':
                         'epoch': epoch,
                         'model_state_dict': tacotron2.state_dict(),
                         'optimizer_state_dict': optimiser.state_dict(),
-                        'iteration': start_i + i},
+                        'iteration': start_i + i + 1},
                         params.checkpoint_path)
 
                 print("generating audio...")
@@ -121,4 +120,8 @@ if __name__ == '__main__':
                                             'Iteration ' + str(start_i + i + 1) + ' reference')
                 griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[-1][:, :mel_lengths[-1]].cpu().detach()),
                                             'Iteration ' + str(start_i + i + 1) + ' post')
+
+                # test if learning identity
+                difference = padded_mels[-1][:, :mel_lengths[-1]] - y_pred_post[-1][:, :mel_lengths[-1]]
+                griffin_lim.save_mel_to_wav(dynamic_range_decompression(difference.cpu().detach()), 'Difference')
 

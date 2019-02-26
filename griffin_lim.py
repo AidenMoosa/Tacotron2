@@ -3,14 +3,13 @@
 # Author: Brian K. Vogel
 # brian.vogel@gmail.com
 
-from pylab import *
-import numpy as np
 import audio_utilities
 from params import audio_out_path, mel_out_path
 from os.path import join
 from librosa.display import specshow
 import librosa
 import params
+from matplotlib.pyplot import *
 
 filterbank = librosa.filters.mel(sr=params.sampling_rate, n_fft=params.n_fft, n_mels=params.n_mel_channels,
                                  fmin=params.f_min, fmax=params.f_max)
@@ -19,6 +18,10 @@ filterbank = librosa.filters.mel(sr=params.sampling_rate, n_fft=params.n_fft, n_
 def save_mel_to_wav(mel_spectrogram, filename='out'):
     inverted_mel_to_linear_freq_spectrogram = np.dot(filterbank.T, mel_spectrogram)
     stft_modified = inverted_mel_to_linear_freq_spectrogram.T
+
+    # Clip values to avoid artifacts
+    stft_modified[stft_modified > 0.05] = 0
+    #stft_modified = np.clip(stft_modified, a_min=None, a_max=0.05)
 
     # Use the Griffin&Lim algorithm to reconstruct an audio signal from the
     # magnitude spectrogram.

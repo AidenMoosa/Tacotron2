@@ -2,8 +2,7 @@ import params
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# TODO: implement data masking for padded inputs
+from audio_utilities import MuLawEncoding, MuLawExpanding
 
 
 class Encoder(nn.Module):
@@ -205,10 +204,11 @@ class Decoder(nn.Module):
         prev_mel = encoder_output.new_zeros((encoder_output.size(0), 80))
 
         # decoder loop
-        predicted_mel = []
+        predicted_mel = [prev_mel]
         decoder_steps = 0
         while True:
             # convert mel frame into model-readable format
+            prev_mel = predicted_mel[decoder_steps]
             prev_mel = F.dropout(F.relu(self.prenet_dense1(prev_mel)), p=0.5)
             prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
 
@@ -230,13 +230,11 @@ class Decoder(nn.Module):
             next_frame = self.linear_proj(decoder_output)
             next_frame = next_frame.squeeze(1)
             predicted_mel.append(next_frame)
-            prev_mel = next_frame
 
             # stop token prediction
             stop_token = torch.sigmoid(self.stop_dense(decoder_output))
-            print(stop_token.data[0, 0, 0])
             decoder_steps = decoder_steps + 1
-            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 5000:
+            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500:
                 break
 
         mel_output = torch.stack(predicted_mel)
@@ -285,6 +283,74 @@ class Postnet(nn.Module):
         return inputs
 
 
+class CausalConv1d(torch.nn.Conv1d):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1, bias=True):
+        self.__padding = (kernel_size - 1) * dilation
+
+        super(CausalConv1d, self).__init__( in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=self.__padding, dilation=dilation, groups=groups, bias=bias)
+
+    def forward(self, inputs):
+        result = super(CausalConv1d, self).forward(inputs)
+        if self.__padding != 0:
+            return result[:, :, :-self.__padding]
+        return result
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, dilation):
+        super(ResidualBlock, self).__init__()
+
+        self.filter_conv_layer = CausalConv1d(1, 1, 5, 1, dilation, 1, True)
+        self.gate_conv_layer = CausalConv1d(1, 1, 5, 1, dilation, 1, True)
+
+        self.residual_conv_layer = nn.Conv1d(1, 1)
+
+    def forward(self, inputs):
+        filter_inputs = self.filter_conv_layer(inputs)
+        gate_inputs = self.gate_conv_layer(inputs)
+
+        filter_activation = torch.tanh(filter_inputs)
+        gate_activation = torch.sigmoid(gate_inputs)
+
+        outputs = filter_activation * gate_activation
+        residual_outputs = self.residual_conv_layer(outputs)
+        residual_outputs = residual_outputs + inputs
+
+        return outputs, residual_outputs
+
+
+class Wavenet(nn.Module):
+    def __init__(self):
+        super(Wavenet, self).__init__()
+
+        self.causal_conv = CausalConv1d(1, 1)
+
+        dilation_pow_limit = params.n_dilation_conv_layers / params.n_dilation_cycles
+        self.residual_blocks = nn.ModuleList([ResidualBlock(pow(2, k) % dilation_pow_limit)
+                                              for k in range(params.n_dilation_conv_layers)])
+
+        skip_channels, end_channels, classes = 1
+
+        self.conv_1 = nn.Conv1d(skip_channels, end_channels)
+        self.conv_2 = nn.Conv1d(end_channels, classes)
+
+    def forward(self, inputs):
+        inputs = self.causal_conv(inputs)
+
+        outputs = torch.zeros((1, 1))
+        for residual_block in self.residual_blocks:
+            skip_inputs, inputs = residual_block(inputs)
+            outputs = outputs + skip_inputs
+
+        outputs = self.conv_1(F.relu(outputs))
+        outputs = self.conv_2(F.relu(outputs))
+        mle = MuLawExpanding(quantization_channels=256)
+        outputs = mle(outputs)
+        outputs = F.softmax(outputs, dim=-1)
+
+        return outputs
+
+
 class Tacotron2(nn.Module):
     def __init__(self):
         super(Tacotron2, self).__init__()
@@ -313,13 +379,12 @@ class Tacotron2(nn.Module):
         return decoder_outputs, postnet_outputs, stop_tokens
 
     def inference(self, text):
-        text = text.unsqueeze(1)
+        text = text.unsqueeze(0)
 
         embedded_inputs = self.embedding(text)
         embedded_inputs = embedded_inputs.transpose(1, 2)
 
         encoder_outputs = self.encoder.inference(embedded_inputs)
-        encoder_outputs = encoder_outputs.transpose(0, 1)
 
         decoder_outputs = self.decoder.inference(encoder_outputs)
         decoder_outputs = decoder_outputs.transpose(1, 2)

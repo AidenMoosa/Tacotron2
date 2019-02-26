@@ -2,7 +2,7 @@ import string
 
 # training params
 inference = False
-inference_text = 'aiden'
+inference_text = 'hello i am tacotron'
 should_checkpoint = True
 resume_from_checkpoint = True
 checkpoint_path = 'out/model/model.p'
@@ -31,3 +31,7 @@ n_fft = 1024
 frame_hop = 256
 window_function = 'hann'
 griffin_lim_iters = 50
+# wavenet parameters
+n_dilation_conv_layers = 30
+n_dilation_cycles = 3
+n_upsampling_layers = 2
