@@ -1,30 +1,46 @@
 import params
-from data import LabelledMelDataset, PadCollate, LJSpeechLoader, text_to_tensor
+from data import LabelledMelDataset, PadCollate, LJSpeechLoader, text_to_tensor, prepare_input
 from model import Tacotron2
 import torch
 import numpy as np
 from torch import optim
 from torch.utils import data
+from torch.utils.data.dataset import random_split
+# from torch.utils.data.sampler import SubsetRandomSampler
 import torch.nn as nn
 import griffin_lim
 from audio_utilities import dynamic_range_decompression
 import sys
 
-if __name__ == '__main__':
-    seed = 42
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+
+def train():
+    np.random.seed(params.seed)
+    torch.manual_seed(params.seed)
+    torch.cuda.manual_seed(params.seed)
 
     dataset_loader = LJSpeechLoader()
     dataset = LabelledMelDataset('resources/LJSpeech-1.1', dataset_loader)
 
+    train_size = int((1.0 - params.validation_split) * dataset.__len__())
+    val_size = int(params.validation_split * dataset.__len__())
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    # train_sampler = SubsetRandomSampler(train_dataset)
+    # val_sampler = SubsetRandomSampler(val_dataset)
+
     pad_collate = PadCollate()
-    data_loader = data.DataLoader(dataset,
-                                  batch_size=params.batch_size,
-                                  collate_fn=pad_collate,
-                                  drop_last=True,
-                                  num_workers=1)
+    train_loader = data.DataLoader(train_dataset,
+                                   batch_size=params.batch_size,
+                                   sampler=None,
+                                   collate_fn=pad_collate,
+                                   drop_last=True,
+                                   num_workers=1)
+    val_loader = data.DataLoader(val_dataset,
+                                 batch_size=params.batch_size,
+                                 sampler=None,
+                                 collate_fn=pad_collate,
+                                 drop_last=True,
+                                 num_workers=1)
 
     tacotron2 = Tacotron2()
     if params.use_gpu:
@@ -40,7 +56,6 @@ if __name__ == '__main__':
 
     start_epoch = 0
     start_i = 0
-    loss = 0
 
     if params.resume_from_checkpoint:
         checkpoint = torch.load(params.checkpoint_path)
@@ -49,42 +64,14 @@ if __name__ == '__main__':
         start_epoch = checkpoint['epoch']
         start_i = checkpoint['iteration']
 
-    if not params.inference:
-        tacotron2.train()
-    else:
-        tacotron2.eval()
-
     if params.inference:
-        text = text_to_tensor(params.inference_text)
+        inference()
 
-        if params.use_gpu:
-            text = text.cuda().long()
-
-        text.requires_grad = False
-
-        y_pred, y_pred_post = tacotron2.inference(text)
-
-        griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()), 'inference')
-        griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference post')
-
-        sys.exit()
+    tacotron2.train()
 
     for epoch in range(start_epoch, params.epochs):
-        for i, batch in enumerate(data_loader):
-            padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = batch
-
-            if params.use_gpu:
-                padded_texts = padded_texts.cuda().long()
-                text_lengths = text_lengths.cuda().long()
-                padded_mels = padded_mels.cuda().float()
-                mel_lengths = mel_lengths.cuda().long()
-                padded_stop_tokens = padded_stop_tokens.cuda().float()
-
-            padded_texts.requires_grad = False
-            text_lengths.requires_grad = False
-            padded_mels.requires_grad = False
-            mel_lengths.requires_grad = False
-            padded_stop_tokens.requires_grad = False
+        for i, batch in enumerate(train_loader):
+            padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
 
             y_pred, y_pred_post, pred_stop_tokens = tacotron2(padded_texts, text_lengths, padded_mels)
 
@@ -97,7 +84,7 @@ if __name__ == '__main__':
                 criterion_stop(pred_stop_tokens, padded_stop_tokens)
             loss.backward()
 
-            print("Batch #" + str(start_i + i + 1) + ": loss = " + str(loss.item()))
+            print("Batch #" + str(start_i + i + 1))
 
             if (start_i + i + 1) % (params.effective_batch_size / params.batch_size) == 0:
                 print("stepping backwards...")
@@ -125,3 +112,46 @@ if __name__ == '__main__':
                 difference = padded_mels[-1][:, :mel_lengths[-1]] - y_pred_post[-1][:, :mel_lengths[-1]]
                 griffin_lim.save_mel_to_wav(dynamic_range_decompression(difference.cpu().detach()), 'Difference')
 
+                validate(tacotron2, val_loader, criterion, criterion_stop)
+
+
+@torch.no_grad()  # no need for backpropagation -> speeds up computation
+def validate(model, val_loader, criterion, criterion_stop):
+    model.eval()
+
+    avg_loss = 0.0
+    for i, batch in enumerate(val_loader):
+        padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
+
+        y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels)
+        loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
+            criterion_stop(pred_stop_tokens, padded_stop_tokens)
+
+        avg_loss += loss.item()
+
+        print("Batch #" + str(i) + ": " + str(avg_loss))
+    avg_loss = avg_loss / (i + 1)
+
+    print("validation loss: " + str(avg_loss))
+
+    model.train()
+
+
+def inference(model):
+    model.eval()
+
+    text = text_to_tensor(params.inference_text)
+    if params.use_gpu:
+        text = text.cuda()
+    text.requires_grad = False
+
+    y_pred, y_pred_post = model.inference(text)
+
+    griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()), 'inference')
+    griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference post')
+
+    sys.exit()
+
+
+if __name__ == '__main__':
+    train()

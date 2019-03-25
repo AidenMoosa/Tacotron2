@@ -14,6 +14,16 @@ def text_to_tensor(label):
     return torch.LongTensor([character_to_index[unidecode(ch)] for ch in label])
 
 
+def prepare_input(batch):
+    batch_list = list(batch)
+
+    batch_list = [x.cuda() for x in batch_list]
+    for x in batch_list:
+        x.requires_grad = False
+
+    return batch_list
+
+
 class LabelledMelDataset(Dataset):
     def __init__(self, root_dir, loader_fn):
         self.paths, self.labels = loader_fn(root_dir)

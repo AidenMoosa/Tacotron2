@@ -1,22 +1,22 @@
-import string
-
 # training params
 inference = False
 inference_text = 'hello i am tacotron'
 should_checkpoint = True
 resume_from_checkpoint = True
 checkpoint_path = 'out/model/model.p'
-checkpoint_skip = 16
+checkpoint_skip = 2
 use_gpu = True
 epochs = 10
 batch_size = 8
 effective_batch_size = 64
+validation_split = 0.1
+seed = 42
 # optimiser parameters
 learning_rate = 1e-3
 epsilon = 1e-6
 weight_decay = 1e-6
 # model parameters
-all_characters = string.printable
+all_characters = [chr(i) for i in range(128)]
 n_characters = len(all_characters)
 embedding_dim = 512
 # output parameters
