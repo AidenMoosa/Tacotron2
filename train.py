@@ -1,5 +1,5 @@
 import params
-from data import LabelledMelDataset, PadCollate, LJSpeechLoader, text_to_tensor, prepare_input
+from data import LabelledMelDataset, PadCollate, LJSpeechLoader, text_to_tensor, prepare_input, save_mels_to_png
 from model import Tacotron2
 import torch
 import numpy as np
@@ -29,6 +29,7 @@ def train():
     # val_sampler = SubsetRandomSampler(val_dataset)
 
     pad_collate = PadCollate()
+
     train_loader = data.DataLoader(train_dataset,
                                    batch_size=params.batch_size,
                                    sampler=None,
@@ -103,15 +104,18 @@ def train():
                         params.checkpoint_path)
 
                 print("generating audio...")
-                griffin_lim.save_mel_to_wav(dynamic_range_decompression(padded_mels[-1][:, :mel_lengths[-1]].cpu().detach()),
+                mel_ref = griffin_lim.save_mel_to_wav(dynamic_range_decompression(padded_mels[-1][:, :mel_lengths[-1]].cpu().detach()),
                                             'Iteration ' + str(start_i + i + 1) + ' reference')
-                griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[-1][:, :mel_lengths[-1]].cpu().detach()),
+                mel_post = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[-1][:, :mel_lengths[-1]].cpu().detach()),
                                             'Iteration ' + str(start_i + i + 1) + ' post')
 
                 # test if learning identity
                 difference = padded_mels[-1][:, :mel_lengths[-1]] - y_pred_post[-1][:, :mel_lengths[-1]]
-                griffin_lim.save_mel_to_wav(dynamic_range_decompression(difference.cpu().detach()), 'Difference')
+                mel_diff = griffin_lim.save_mel_to_wav(dynamic_range_decompression(difference.cpu().detach()), 'Difference')
 
+                # save to png
+                save_mels_to_png((mel_ref, mel_post, mel_diff), ("Reference", "Output", "Difference"), str(i))
+                
                 validate(tacotron2, val_loader, criterion, criterion_stop)
 
 
@@ -137,13 +141,13 @@ def validate(model, val_loader, criterion, criterion_stop):
     model.train()
 
 
+@torch.no_grad()  # no need for backpropagation -> speeds up computation
 def inference(model):
     model.eval()
 
     text = text_to_tensor(params.inference_text)
     if params.use_gpu:
         text = text.cuda()
-    text.requires_grad = False
 
     y_pred, y_pred_post = model.inference(text)
 
@@ -154,4 +158,4 @@ def inference(model):
 
 
 if __name__ == '__main__':
-    train()
+    train()  # TODO: currently no way of switching between training/inference modes

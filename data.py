@@ -1,11 +1,13 @@
 import os
+from os.path import join
 import params
 import torch
 from torch.utils.data import Dataset
 import librosa
+from librosa.display import specshow
 from audio_utilities import dynamic_range_compression
-import numpy as np
 from unidecode import unidecode
+from matplotlib.pyplot import *
 
 character_to_index = {ch: i for i, ch in enumerate(params.all_characters)}
 
@@ -22,6 +24,23 @@ def prepare_input(batch):
         x.requires_grad = False
 
     return batch_list
+
+
+def save_mels_to_png(mels, titles, filename):
+    num_mels = len(mels)
+
+    figure(figsize=(6.4 * num_mels, 4.8))  # TODO: see if you should clear the figures in some way
+
+    for i, mel in enumerate(mels):
+        subplot(1, num_mels, i + 1)
+        specshow(mel, cmap=cm.viridis)
+        title(titles[i])
+        xlabel('Frame')
+        ylabel('Frequency Bin Index')
+        colorbar()
+        # TODO: make heatmap values uniform
+
+    savefig(join(params.mel_out_path, filename + '.png'), bbox_inches='tight', dpi=128)
 
 
 class LabelledMelDataset(Dataset):

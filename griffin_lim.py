@@ -6,7 +6,6 @@
 import audio_utilities
 from params import audio_out_path, mel_out_path
 from os.path import join
-from librosa.display import specshow
 import librosa
 import params
 from matplotlib.pyplot import *
@@ -36,6 +35,10 @@ def save_mel_to_wav(mel_spectrogram, filename='out'):
     # Save the reconstructed signal to a WAV file.
     audio_utilities.save_audio_to_file(x_reconstruct, params.sampling_rate, outfile=join(audio_out_path, filename + '.wav'))
 
+    # Return mel spectrogram data
+    return stft_modified.T
+
+    '''
     # Save the spectrogram image also.
     clf()
     figure(5)
@@ -45,3 +48,4 @@ def save_mel_to_wav(mel_spectrogram, filename='out'):
     xlabel('Frame')
     ylabel('Frequency Bin Index')
     savefig(join(mel_out_path, filename + '.png'), dpi=128)
+    '''

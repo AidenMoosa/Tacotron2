@@ -2,12 +2,12 @@
 inference = False
 inference_text = 'hello i am tacotron'
 should_checkpoint = True
-resume_from_checkpoint = True
+resume_from_checkpoint = False
 checkpoint_path = 'out/model/model.p'
 checkpoint_skip = 2
 use_gpu = True
 epochs = 10
-batch_size = 8
+batch_size = 4
 effective_batch_size = 64
 validation_split = 0.1
 seed = 42
