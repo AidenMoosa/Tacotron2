@@ -1,8 +1,9 @@
 import os
 from os.path import join
+from pathlib import Path
 import params
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset
 import librosa
 from librosa.display import specshow
 from audio_utilities import dynamic_range_compression
@@ -43,13 +44,34 @@ def save_mels_to_png(mels, titles, filename):
     savefig(join(params.mel_out_path, filename + '.png'), bbox_inches='tight', dpi=128)
 
 
-class LabelledMelDataset(Dataset):
-    def __init__(self, root_dir, loader_fn):
-        self.paths, self.labels = loader_fn(root_dir)
-        self.root_dir = root_dir
+def load_from_files(filelist_dir, dataset):
+    train_stems = parse_filelist(join(filelist_dir, 'train_filelist.txt'))
+    val_stems = parse_filelist(join(filelist_dir, 'val_filelist.txt'))
+    test_stems = parse_filelist(join(filelist_dir, 'test_filelist.txt'))
 
+    train_idxs = [dataset.stem_to_idx[s] for s in train_stems]
+    val_idxs = [dataset.stem_to_idx[s] for s in val_stems]
+    test_idxs = [dataset.stem_to_idx[s] for s in test_stems]
+
+    return Subset(dataset, train_idxs), Subset(dataset, val_idxs), Subset(dataset, test_idxs)
+
+
+def parse_filelist(filename):
+    stems = []
+    with open(filename, encoding='utf-8', errors='ignore') as filelist:
+        for line in filelist:
+            path, _ = line.split('|')
+            stems.append(Path(path).stem)
+    return stems
+
+
+class LabelledMelDataset(Dataset):
+    def __init__(self, data_dir, loader_fn):
+        self.paths, self.labels = loader_fn(data_dir)
         self.mel_filterbank = librosa.filters.mel(sr=22050, n_fft=params.n_fft, n_mels=params.n_mel_channels,
                                                   fmin=params.f_min, fmax=params.f_max)
+
+        self.stem_to_idx = {p.stem: i for i, p in enumerate(self.paths)}
 
     def label_to_list(self, label):
         return [character_to_index[unidecode(ch)] for ch in label]
@@ -117,6 +139,23 @@ class PadCollate:
             torch.stack(padded_stop_tokens)
 
 
+class LJSpeechLoader:
+    def __init__(self):
+        pass
+
+    def __call__(self, data_dir):
+        data_path = Path(data_dir)
+
+        paths, labels = [], []
+        with open(os.path.join(data_dir, "metadata.csv"), encoding='utf-8') as metadata:
+            for line in metadata:
+                path, _, label = line.split('|')
+                paths.append(data_path / 'wavs' / (path + '.wav'))
+                labels.append(label)
+
+        return paths, labels
+
+'''
 class LibriSpeechLoader:
     def __init__(self):
         pass
@@ -153,18 +192,4 @@ class LibriSpeechLoader:
                             string += c
 
         return paths, labels
-
-
-class LJSpeechLoader:
-    def __init__(self):
-        pass
-
-    def __call__(self, root_dir):
-        paths, labels = [], []
-        with open(os.path.join(root_dir, "metadata.csv"), encoding='utf-8') as metadata:
-            for line in metadata:
-                path, _, label = line.split('|')
-                paths.append(os.path.join(root_dir, 'wavs', path + '.wav'))
-                labels.append(label)
-
-        return paths, labels
+'''

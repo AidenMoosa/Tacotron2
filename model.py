@@ -323,6 +323,11 @@ class Wavenet(nn.Module):
     def __init__(self):
         super(Wavenet, self).__init__()
 
+        # We want to upsample the mel spectrogram to align it with the desired 16-bit 24KHz model --
+        # Tacotron 2 paper specifies 2 upsampling layers
+        self.t_conv_1 = nn.ConvTranspose1d(1, 1)
+        self.t_conv_2 = nn.ConvTranspose1d(1, 1)
+
         self.causal_conv = CausalConv1d(1, 1)
 
         dilation_pow_limit = params.n_dilation_conv_layers / params.n_dilation_cycles

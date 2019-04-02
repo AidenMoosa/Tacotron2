@@ -1,12 +1,11 @@
 import params
-from data import LabelledMelDataset, PadCollate, LJSpeechLoader, text_to_tensor, prepare_input, save_mels_to_png
+from data import LabelledMelDataset, PadCollate, LJSpeechLoader, text_to_tensor, prepare_input, save_mels_to_png, load_from_files
 from model import Tacotron2
 import torch
 import numpy as np
 from torch import optim
 from torch.utils import data
 from torch.utils.data.dataset import random_split
-# from torch.utils.data.sampler import SubsetRandomSampler
 import torch.nn as nn
 import griffin_lim
 from audio_utilities import dynamic_range_decompression
@@ -23,10 +22,8 @@ def train():
 
     train_size = int((1.0 - params.validation_split) * dataset.__len__())
     val_size = int(params.validation_split * dataset.__len__())
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-
-    # train_sampler = SubsetRandomSampler(train_dataset)
-    # val_sampler = SubsetRandomSampler(val_dataset)
+    # train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    train_dataset, val_dataset, test_dataset = load_from_files('resources/LJSpeech-1.1/filelists', dataset)
 
     pad_collate = PadCollate()
 
@@ -56,14 +53,12 @@ def train():
     criterion_stop = nn.BCEWithLogitsLoss()
 
     start_epoch = 0
-    start_i = 0
 
     if params.resume_from_checkpoint:
         checkpoint = torch.load(params.checkpoint_path)
         tacotron2.load_state_dict(checkpoint['model_state_dict'])
         optimiser.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']
-        start_i = checkpoint['iteration']
 
     if params.inference:
         inference()
@@ -85,38 +80,37 @@ def train():
                 criterion_stop(pred_stop_tokens, padded_stop_tokens)
             loss.backward()
 
-            print("Batch #" + str(start_i + i + 1))
+            print("Batch #" + str(i + 1))
 
-            if (start_i + i + 1) % (params.effective_batch_size / params.batch_size) == 0:
+            if (i + 1) % (params.effective_batch_size / params.batch_size) == 0:
                 print("stepping backwards...")
                 optimiser.step()
                 optimiser.zero_grad()
 
-            if (start_i + i + 1) % params.checkpoint_skip == 0:
-                # checkpoint the model
-                if params.should_checkpoint:
-                    print("saving model...")
-                    torch.save({
-                        'epoch': epoch,
-                        'model_state_dict': tacotron2.state_dict(),
-                        'optimizer_state_dict': optimiser.state_dict(),
-                        'iteration': start_i + i + 1},
-                        params.checkpoint_path)
+        if epoch % params.checkpoint_skip == 0:
+            # checkpoint the model
+            if params.should_checkpoint:
+                print("saving model...")
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': tacotron2.state_dict(),
+                    'optimizer_state_dict': optimiser.state_dict()},
+                    params.checkpoint_path)
 
-                print("generating audio...")
-                mel_ref = griffin_lim.save_mel_to_wav(dynamic_range_decompression(padded_mels[-1][:, :mel_lengths[-1]].cpu().detach()),
-                                            'Iteration ' + str(start_i + i + 1) + ' reference')
-                mel_post = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[-1][:, :mel_lengths[-1]].cpu().detach()),
-                                            'Iteration ' + str(start_i + i + 1) + ' post')
+            print("generating audio...")
+            mel_ref = griffin_lim.save_mel_to_wav(dynamic_range_decompression(padded_mels[-1][:, :mel_lengths[-1]].cpu().detach()),
+                                            'Epoch ' + str(epoch + 1) + ' reference')
+            mel_post = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[-1][:, :mel_lengths[-1]].cpu().detach()),
+                                            'Epoch ' + str(epoch + 1) + ' post')
 
-                # test if learning identity
-                difference = padded_mels[-1][:, :mel_lengths[-1]] - y_pred_post[-1][:, :mel_lengths[-1]]
-                mel_diff = griffin_lim.save_mel_to_wav(dynamic_range_decompression(difference.cpu().detach()), 'Difference')
+            # test if learning identity
+            difference = padded_mels[-1][:, :mel_lengths[-1]] - y_pred_post[-1][:, :mel_lengths[-1]]
+            mel_diff = griffin_lim.save_mel_to_wav(dynamic_range_decompression(difference.cpu().detach()), 'Difference')
 
-                # save to png
-                save_mels_to_png((mel_ref, mel_post, mel_diff), ("Reference", "Output", "Difference"), str(i))
+            # save to png
+            save_mels_to_png((mel_ref, mel_post, mel_diff), ("Reference", "Output", "Difference"), str(i))
                 
-                validate(tacotron2, val_loader, criterion, criterion_stop)
+            validate(tacotron2, val_loader, criterion, criterion_stop)
 
 
 @torch.no_grad()  # no need for backpropagation -> speeds up computation
