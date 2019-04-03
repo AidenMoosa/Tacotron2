@@ -10,6 +10,7 @@ import torch.nn as nn
 import griffin_lim
 from audio_utilities import dynamic_range_decompression
 import sys
+import os
 
 
 def train():
@@ -20,8 +21,8 @@ def train():
     dataset_loader = LJSpeechLoader()
     dataset = LabelledMelDataset('resources/LJSpeech-1.1', dataset_loader)
 
-    train_size = int((1.0 - params.validation_split) * dataset.__len__())
-    val_size = int(params.validation_split * dataset.__len__())
+    # train_size = int((1.0 - params.validation_split) * dataset.__len__())
+    # val_size = int(params.validation_split * dataset.__len__())
     # train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     train_dataset, val_dataset, test_dataset = load_from_files('resources/LJSpeech-1.1/filelists', dataset)
 
@@ -127,10 +128,14 @@ def validate(model, val_loader, criterion, criterion_stop):
 
         avg_loss += loss.item()
 
-        print("Batch #" + str(i) + ": " + str(avg_loss))
+        print("Batch #" + str(i + 1) + ": " + str(avg_loss))
     avg_loss = avg_loss / (i + 1)
 
     print("validation loss: " + str(avg_loss))
+
+    # Write loss out
+    with open('loss.txt', 'a') as out:
+        out.write(str(avg_loss) + '\n')
 
     model.train()
 
@@ -152,4 +157,8 @@ def inference(model):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) > 1:
+        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        os.environ["CUDA_VISIBLE_DEVICES"] = sys.argv[1]
+
     train()  # TODO: currently no way of switching between training/inference modes

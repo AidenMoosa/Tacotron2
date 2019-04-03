@@ -8,7 +8,10 @@ import librosa
 from librosa.display import specshow
 from audio_utilities import dynamic_range_compression
 from unidecode import unidecode
-from matplotlib.pyplot import *
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 character_to_index = {ch: i for i, ch in enumerate(params.all_characters)}
 
@@ -30,18 +33,18 @@ def prepare_input(batch):
 def save_mels_to_png(mels, titles, filename):
     num_mels = len(mels)
 
-    figure(figsize=(6.4 * num_mels, 4.8))  # TODO: see if you should clear the figures in some way
+    plt.figure(figsize=(6.4 * num_mels, 4.8))  # TODO: see if you should clear the figures in some way
 
     for i, mel in enumerate(mels):
-        subplot(1, num_mels, i + 1)
-        specshow(mel, cmap=cm.viridis)
-        title(titles[i])
-        xlabel('Frame')
-        ylabel('Frequency Bin Index')
-        colorbar()
+        plt.subplot(1, num_mels, i + 1)
+        specshow(mel, cmap=plt.cm.viridis)
+        plt.title(titles[i])
+        plt.xlabel('Frame')
+        plt.ylabel('Frequency Bin Index')
+        plt.colorbar()
         # TODO: make heatmap values uniform
 
-    savefig(join(params.mel_out_path, filename + '.png'), bbox_inches='tight', dpi=128)
+    plt.savefig(join(params.mel_out_path, filename + '.png'), bbox_inches='tight', dpi=128)
 
 
 def load_from_files(filelist_dir, dataset):
@@ -77,7 +80,7 @@ class LabelledMelDataset(Dataset):
         return [character_to_index[unidecode(ch)] for ch in label]
 
     def audiopath_to_mel(self, path):
-        y, sr = librosa.load(path)
+        y, sr = librosa.load(path.as_posix())
 
         # ensure sampling rate is the same
         assert(sr == params.sampling_rate)

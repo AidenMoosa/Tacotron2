@@ -8,7 +8,7 @@ from params import audio_out_path, mel_out_path
 from os.path import join
 import librosa
 import params
-from matplotlib.pyplot import *
+import numpy as np
 
 filterbank = librosa.filters.mel(sr=params.sampling_rate, n_fft=params.n_fft, n_mels=params.n_mel_channels,
                                  fmin=params.f_min, fmax=params.f_max)
@@ -37,15 +37,3 @@ def save_mel_to_wav(mel_spectrogram, filename='out'):
 
     # Return mel spectrogram data
     return stft_modified.T
-
-    '''
-    # Save the spectrogram image also.
-    clf()
-    figure(5)
-    specshow(stft_modified.T, cmap=cm.viridis)
-    colorbar()
-    title(filename + ' Spectrogram')
-    xlabel('Frame')
-    ylabel('Frequency Bin Index')
-    savefig(join(mel_out_path, filename + '.png'), dpi=128)
-    '''

@@ -9,7 +9,8 @@ import scipy.signal
 import array
 import scipy.io.wavfile
 import torch
-from matplotlib.pyplot import *
+import numpy as np
+
 
 def hz_to_mel(f_hz):
     """Convert Hz to mel scale.
@@ -109,7 +110,7 @@ def istft_for_reconstruction(X, fft_size, hopsamp):
     time_slices = X.shape[0]
     len_samples = int(time_slices*hopsamp + fft_size)
     x = np.zeros(len_samples)
-    for n,i in enumerate(range(0, len(x)-fft_size, hopsamp)):
+    for n, i in enumerate(range(0, len(x)-fft_size, hopsamp)):
         x[i:i+fft_size] += window*np.real(np.fft.irfft(X[n]))
     return x
 
@@ -174,16 +175,16 @@ def reconstruct_signal_griffin_lim(magnitude_spectrogram, fft_size, hopsamp, ite
     len_samples = int(time_slices*hopsamp + fft_size)
     # Initialize the reconstructed signal to noise.
     x_reconstruct = np.random.randn(len_samples)
-    n = iterations # number of iterations of Griffin-Lim algorithm.
+    n = iterations  # number of iterations of Griffin-Lim algorithm.
     while n > 0:
         n -= 1
         reconstruction_spectrogram = stft_for_reconstruction(x_reconstruct, fft_size, hopsamp)
         reconstruction_angle = np.angle(reconstruction_spectrogram)
         # Discard magnitude part of the reconstruction and use the supplied magnitude spectrogram instead.
         proposal_spectrogram = magnitude_spectrogram*np.exp(1.0j*reconstruction_angle)
-        prev_x = x_reconstruct
+        # prev_x = x_reconstruct
         x_reconstruct = istft_for_reconstruction(proposal_spectrogram, fft_size, hopsamp)
-        diff = np.sqrt(sum((x_reconstruct - prev_x)**2)/x_reconstruct.size)
+        # diff = np.sqrt(sum((x_reconstruct - prev_x)**2)/x_reconstruct.size)
         # print('Reconstruction iteration: {}/{} RMSE: {} '.format(iterations - n, iterations, diff))
     return x_reconstruct
 
@@ -279,13 +280,13 @@ class MuLawExpanding(object):
         """
         mu = self.qc - 1.
         if isinstance(x_mu, np.ndarray):
-            x = ((x_mu) / mu) * 2 - 1.
+            x = (x_mu / mu) * 2 - 1.
             x = np.sign(x) * (np.exp(np.abs(x) * np.log1p(mu)) - 1.) / mu
         elif isinstance(x_mu, torch.Tensor):
             if not x_mu.dtype.is_floating_point:
                 x_mu = x_mu.to(torch.float)
             mu = torch.tensor(mu, dtype=x_mu.dtype)
-            x = ((x_mu) / mu) * 2 - 1.
+            x = (x_mu / mu) * 2 - 1.
             x = torch.sign(x) * (torch.exp(torch.abs(x) * torch.log1p(mu)) - 1.) / mu
         return x
 
