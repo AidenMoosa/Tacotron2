@@ -381,6 +381,9 @@ class Tacotron2(nn.Module):
         postnet_outputs = self.postnet(decoder_outputs)
         postnet_outputs = postnet_outputs + decoder_outputs
 
+        print("\tIn Model: input size", padded_mels.size(),
+              "output size", postnet_outputs.size())
+
         return decoder_outputs, postnet_outputs, stop_tokens
 
     def inference(self, text):

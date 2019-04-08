@@ -13,7 +13,7 @@ import sys
 import os
 
 
-def train():
+def train(use_multiple_gpus = False):
     np.random.seed(params.seed)
     torch.manual_seed(params.seed)
     torch.cuda.manual_seed(params.seed)
@@ -42,6 +42,10 @@ def train():
                                  num_workers=1)
 
     tacotron2 = Tacotron2()
+
+    if use_multiple_gpus:
+        tacotron2 = nn.DataParallel(tacotron2)
+
     if params.use_gpu:
         tacotron2 = tacotron2.cuda()
 
@@ -62,7 +66,7 @@ def train():
         start_epoch = checkpoint['epoch']
 
     if params.inference:
-        inference()
+        inference(tacotron2)
 
     tacotron2.train()
 
@@ -71,6 +75,9 @@ def train():
             padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
 
             y_pred, y_pred_post, pred_stop_tokens = tacotron2(padded_texts, text_lengths, padded_mels)
+
+            print("Outside: input size", padded_mels.size(),
+                  "output_size", y_pred_post.size())
 
             for b in range(params.batch_size):
                 y_pred[b][mel_lengths[b]:] = 0
@@ -87,6 +94,11 @@ def train():
                 print("stepping backwards...")
                 optimiser.step()
                 optimiser.zero_grad()
+
+            # may need to explicitly free up this memory, not sure yet
+            to_del_list = [padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens, y_pred, y_pred_post, pred_stop_tokens]
+            for del_item in to_del_list:
+                del del_item
 
         if epoch % params.checkpoint_skip == 0:
             # checkpoint the model
@@ -109,7 +121,7 @@ def train():
             mel_diff = griffin_lim.save_mel_to_wav(dynamic_range_decompression(difference.cpu().detach()), 'Difference')
 
             # save to png
-            save_mels_to_png((mel_ref, mel_post, mel_diff), ("Reference", "Output", "Difference"), str(i))
+            save_mels_to_png((mel_ref, mel_post, mel_diff), ("Reference", "Output", "Difference"), str(epoch))
                 
             validate(tacotron2, val_loader, criterion, criterion_stop)
 
@@ -157,8 +169,14 @@ def inference(model):
 
 
 if __name__ == '__main__':
+    use_multiple_gpus = False
+
     if len(sys.argv) > 1:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = sys.argv[1]
+    else:
+        if torch.cuda.device_count() > 1:
+            print("Let's use", torch.cuda.device_count(), "GPUs!")
+            use_multiple_gpus = True
 
-    train()  # TODO: currently no way of switching between training/inference modes
+    train(use_multiple_gpus)  # TODO: currently no way of switching between training/inference modes

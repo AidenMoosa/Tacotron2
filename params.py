@@ -1,13 +1,13 @@
 # training params
-inference = False
-inference_text = 'hello i am tacotron'
+inference = True
+inference_text = 'Isobel likes to play in the sand.'
 should_checkpoint = True
-resume_from_checkpoint = False
+resume_from_checkpoint = True
 checkpoint_path = 'out/model/model.p'
 checkpoint_skip = 1
 use_gpu = True
 epochs = 400
-batch_size = 4
+batch_size = 8
 effective_batch_size = 64
 validation_split = 0.1
 seed = 42
