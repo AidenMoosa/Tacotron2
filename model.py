@@ -1,7 +1,9 @@
 import params
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributions as D
 from audio_utilities import MuLawEncoding, MuLawExpanding
 
 
@@ -138,22 +140,29 @@ class Decoder(nn.Module):
             self.stop_dense.weight,
             gain=torch.nn.init.calculate_gain('sigmoid'))
 
-    def forward(self, inputs, padded_mels):
+    def forward(self, inputs, padded_mels, teacher_forced_ratio=1.0):
         # can do this before
         processed_encoder_output = self.attention.encoder_output_linear_proj(inputs)
 
         #
-        attention_weights_cum = padded_mels.new_zeros((params.batch_size, inputs.size(1)))
-        attention_context = padded_mels.new_zeros((params.batch_size, params.embedding_dim))
+        attention_weights_cum = padded_mels.new_zeros((inputs.size(0), inputs.size(1)))
+        attention_context = padded_mels.new_zeros((inputs.size(0), params.embedding_dim))
 
         # prepend dummy mel frame
-        padded_mels = torch.cat((padded_mels.new_zeros((params.batch_size, 80, 1)), padded_mels), dim=-1)
+        padded_mels = torch.cat((padded_mels.new_zeros((inputs.size(0), 80, 1)), padded_mels), dim=-1)
+
+        #
+        predicted_mel = padded_mels.new_zeros((inputs.size(0), 80))
 
         # decoder loop
-        predicted_mel, stop_tokens = [], []
+        predicted_mels, stop_tokens = [], []
         for decoder_step in range(padded_mels.size(-1) - 1):
             # grab previous mel frame as decoder input
             prev_mel = padded_mels[:, :, decoder_step]
+
+            # using teacher-forced ratio to speed convergence
+            if random.random() > teacher_forced_ratio:
+                prev_mel = predicted_mel
 
             # convert mel frame into model-readable format
             prev_mel = F.dropout(F.relu(self.prenet_dense1(prev_mel)), p=0.5)
@@ -174,9 +183,9 @@ class Decoder(nn.Module):
             decoder_output = torch.cat((lstm_output, attention_context), dim=-1)
             attention_context = attention_context.squeeze(1)
 
-            next_frame = self.linear_proj(decoder_output)
-            next_frame = next_frame.squeeze(1)
-            predicted_mel.append(next_frame)
+            predicted_mel = self.linear_proj(decoder_output)
+            predicted_mel = predicted_mel.squeeze(1)
+            predicted_mels.append(predicted_mel)
 
             # stop token prediction
             stop_token = self.stop_dense(decoder_output)
@@ -184,7 +193,7 @@ class Decoder(nn.Module):
             stop_token = stop_token.squeeze(-1)
             stop_tokens.append(stop_token)
 
-        mel_output = torch.stack(predicted_mel)
+        mel_output = torch.stack(predicted_mels)
         mel_output = mel_output.transpose(0, 1)
 
         stop_tokens_t = torch.stack(stop_tokens)
@@ -204,11 +213,11 @@ class Decoder(nn.Module):
         prev_mel = encoder_output.new_zeros((encoder_output.size(0), 80))
 
         # decoder loop
-        predicted_mel = [prev_mel]
+        predicted_mels = [prev_mel]
         decoder_steps = 0
         while True:
             # convert mel frame into model-readable format
-            prev_mel = predicted_mel[decoder_steps]
+            prev_mel = predicted_mels[decoder_steps]
             prev_mel = F.dropout(F.relu(self.prenet_dense1(prev_mel)), p=0.5)
             prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
 
@@ -227,17 +236,18 @@ class Decoder(nn.Module):
             decoder_output = torch.cat((lstm_output, attention_context), dim=-1)
             attention_context = attention_context.squeeze(1)
 
-            next_frame = self.linear_proj(decoder_output)
-            next_frame = next_frame.squeeze(1)
-            predicted_mel.append(next_frame)
+            predicted_mel = self.linear_proj(decoder_output)
+            predicted_mel = predicted_mel.squeeze(1)
+            predicted_mels.append(predicted_mel)
 
             # stop token prediction
             stop_token = torch.sigmoid(self.stop_dense(decoder_output))
             decoder_steps = decoder_steps + 1
-            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500:
+
+            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500: # TODO: remove limit on decoder steps
                 break
 
-        mel_output = torch.stack(predicted_mel)
+        mel_output = torch.stack(predicted_mels)
         mel_output = mel_output.transpose(0, 1)
 
         return mel_output
@@ -319,9 +329,45 @@ class ResidualBlock(nn.Module):
         return outputs, residual_outputs
 
 
+class MixtureOfLogistics:
+    def __init__(self, num_components=1):
+        self.num_components = num_components
+
+    # from https://pytorch.org/docs/stable/distributions.html#transformeddistribution
+    def create_logistic_distribution(self, a, b):
+        # Building a Logistic Distribution
+        # X ~ Uniform(0, 1)
+        # f = a + b * logit(X)
+        # Y ~ f(X) ~ Logistic(a, b)
+        base_distribution = D.Uniform(0, 1)
+        transforms = [D.SigmoidTransform().inv, D.AffineTransform(loc=a, scale=b)]
+        logistic = D.TransformedDistribution(base_distribution, transforms)
+        return logistic
+
+    def calculate_neg_log_probs(self, targets, weights):
+        # INPUT:
+        #   targets: B x 1
+        #   weights: B x N_MOL_COMP x 3 (mix, loc, scale)
+
+        # Initialise distributions from weights
+        distributions = [[self.create_logistic_distribution(weights[b][n][1], weights[b][n][2])
+                          for n in range(weights.size(1))]
+                         for b in range(weights.size(0))]
+
+        # Calculate log probs of mixture distribution given targets
+        log_probs = torch.tensor([[distributions[b][n].log_prob(targets[b]) * weights[b][n][0]
+                                  for n in range(weights.size(1))]
+                                 for b in range(weights.size(0))])
+
+        return -torch.sum(log_probs, dim=1)
+
+
 class Wavenet(nn.Module):
-    def __init__(self):
+    def __init__(self, skip_channels=1, end_channels=1, classes=1):
         super(Wavenet, self).__init__()
+
+        # We need to create the mixture of logistic distributions to sample from (parameters are generated later)
+        self.MoL = MixtureOfLogistics(params.n_mol_components)
 
         # We want to upsample the mel spectrogram to align it with the desired 16-bit 24KHz model --
         # Tacotron 2 paper specifies 2 upsampling layers
@@ -333,8 +379,6 @@ class Wavenet(nn.Module):
         dilation_pow_limit = params.n_dilation_conv_layers / params.n_dilation_cycles
         self.residual_blocks = nn.ModuleList([ResidualBlock(pow(2, k) % dilation_pow_limit)
                                               for k in range(params.n_dilation_conv_layers)])
-
-        skip_channels, end_channels, classes = 1
 
         self.conv_1 = nn.Conv1d(skip_channels, end_channels)
         self.conv_2 = nn.Conv1d(end_channels, classes)
@@ -367,7 +411,7 @@ class Tacotron2(nn.Module):
         self.decoder = Decoder()
         self.postnet = Postnet()
 
-    def forward(self, padded_texts, text_lengths, padded_mels):
+    def forward(self, padded_texts, text_lengths, padded_mels, teacher_forced_ratio=1.0):
         text_lengths = text_lengths.data
 
         embedded_inputs = self.embedding(padded_texts)
@@ -375,14 +419,11 @@ class Tacotron2(nn.Module):
 
         encoder_outputs = self.encoder(embedded_inputs, text_lengths)
 
-        decoder_outputs, stop_tokens = self.decoder(encoder_outputs, padded_mels)
+        decoder_outputs, stop_tokens = self.decoder(encoder_outputs, padded_mels, teacher_forced_ratio)
         decoder_outputs = decoder_outputs.transpose(1, 2)
 
         postnet_outputs = self.postnet(decoder_outputs)
         postnet_outputs = postnet_outputs + decoder_outputs
-
-        print("\tIn Model: input size", padded_mels.size(),
-              "output size", postnet_outputs.size())
 
         return decoder_outputs, postnet_outputs, stop_tokens
 
