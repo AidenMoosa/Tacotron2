@@ -1,5 +1,5 @@
 # training params
-inference = True
+inference = False
 inference_text = 'Isobel likes to play in the sand'
 should_checkpoint = True
 resume_from_checkpoint = True
@@ -21,6 +21,8 @@ teacher_forcing_decay_steps = 40000  # Determines the teacher forcing ratio deca
 teacher_forcing_decay_alpha = 0.  # teacher forcing ratio decay rate. Defines the final tfr as a ratio of initial tfr. Relevant if mode='scheduled'
 # optimiser parameters
 learning_rate = 1e-3
+learning_rate_min = 1e-5
+gamma_decay = 0.9
 epsilon = 1e-6
 weight_decay = 1e-6
 # model parameters
