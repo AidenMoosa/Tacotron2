@@ -244,8 +244,10 @@ class Decoder(nn.Module):
             stop_token = torch.sigmoid(self.stop_dense(decoder_output))
             decoder_steps = decoder_steps + 1
 
-            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500: # TODO: remove limit on decoder steps
+            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500:  # TODO: remove limit on decoder steps
                 break
+
+            print("Decoder step #" + str(decoder_steps) + ": " + str(stop_token))
 
         mel_output = torch.stack(predicted_mels)
         mel_output = mel_output.transpose(0, 1)
@@ -371,8 +373,8 @@ class Wavenet(nn.Module):
 
         # We want to upsample the mel spectrogram to align it with the desired 16-bit 24KHz model --
         # Tacotron 2 paper specifies 2 upsampling layers
-        self.t_conv_1 = nn.ConvTranspose1d(1, 1)
-        self.t_conv_2 = nn.ConvTranspose1d(1, 1)
+        self.t_conv_1 = nn.ConvTranspose1d(in_channels=1, out_channels=1)
+        self.t_conv_2 = nn.ConvTranspose1d(in_channels=1, out_channels=1)
 
         self.causal_conv = CausalConv1d(1, 1)
 

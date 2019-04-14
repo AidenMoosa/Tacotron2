@@ -1,6 +1,6 @@
 # training params
-inference = False
-inference_text = 'Isobel likes the play in the sand'
+inference = True
+inference_text = 'Isobel likes to play in the sand'
 should_checkpoint = True
 resume_from_checkpoint = True
 checkpoint_path = 'out/model/model.p'

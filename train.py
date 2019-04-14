@@ -30,6 +30,7 @@ def calculate_teacher_forced_ratio(epoch):
 
     return decayed_teacher_forced_ratio
 
+
 def train(use_multiple_gpus = False):
     random.seed(params.seed)
     np.random.seed(params.seed)
@@ -169,9 +170,14 @@ def validate(model, train_loader, val_loader, criterion, criterion_stop):
         padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
 
         y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio=0.0)
+
+        for b in range(params.batch_size):
+            y_pred[b][mel_lengths[b]:] = 0
+            y_pred_post[b][mel_lengths[b]:] = 0
+            pred_stop_tokens[b][mel_lengths[b]:] = 1
+
         loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
             criterion_stop(pred_stop_tokens, padded_stop_tokens)
-
         train_loss += loss.item()
 
         print("Batch #" + str(i + 1) + ": " + str(train_loss))
@@ -183,9 +189,14 @@ def validate(model, train_loader, val_loader, criterion, criterion_stop):
         padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
 
         y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio=0.0)
+
+        for b in range(params.batch_size):
+            y_pred[b][mel_lengths[b]:] = 0
+            y_pred_post[b][mel_lengths[b]:] = 0
+            pred_stop_tokens[b][mel_lengths[b]:] = 1
+
         loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
             criterion_stop(pred_stop_tokens, padded_stop_tokens)
-
         val_loss += loss.item()
 
         print("Batch #" + str(i + 1) + ": " + str(val_loss))
@@ -210,8 +221,11 @@ def inference(model):
 
     y_pred, y_pred_post = model.inference(text)
 
-    griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()), 'inference')
-    griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference post')
+    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()), 'inference')
+    mel_post = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference post')
+
+    # save to png
+    save_mels_to_png((mel, mel_post), ("Mel", "Post"), "Inference")
 
     sys.exit()
 
@@ -227,4 +241,4 @@ if __name__ == '__main__':
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             use_multiple_gpus = True
 
-    train(use_multiple_gpus)  # TODO: currently no way of switching between training/inference modes
+    train()  # TODO: currently no way of switching between training/inference modes
