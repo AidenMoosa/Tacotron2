@@ -1,17 +1,11 @@
 import params
-from data import LabelledMelDataset, PadCollate, LJSpeechLoader, text_to_tensor, prepare_input, save_mels_to_png, load_from_files
+from data import LabelledMelDataset, PadCollate, LJSpeechLoader, prepare_input, load_from_files, set_seed
 from model import Tacotron2
 import random
 import torch
-import numpy as np
 from torch import optim
 from torch.utils import data
-from torch.utils.data.dataset import random_split
 import torch.nn as nn
-import griffin_lim
-from audio_utilities import dynamic_range_decompression
-import sys
-import os
 import math
 
 
@@ -44,18 +38,28 @@ def calculate_exponential_lr(epoch):
     return lr
 
 
-def train(use_multiple_gpus = False):
-    random.seed(params.seed)
-    np.random.seed(params.seed)
-    torch.manual_seed(params.seed)
-    torch.cuda.manual_seed(params.seed)
+def calculate_loss(model, batch, teacher_forced_ratio, criterion, criterion_stop):
+    padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
+
+    y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio)
+
+    for b in range(params.batch_size):
+        y_pred[b][:][mel_lengths[b]:] = 0
+        y_pred_post[b][:][mel_lengths[b]:] = 0
+        pred_stop_tokens[b][mel_lengths[b]:] = 1
+
+    loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
+        criterion_stop(pred_stop_tokens, padded_stop_tokens)
+
+    return loss
+
+
+def train(use_multiple_gpus=False):
+    model = Tacotron2()
 
     dataset_loader = LJSpeechLoader()
     dataset = LabelledMelDataset('resources/LJSpeech-1.1', dataset_loader)
 
-    # train_size = int((1.0 - params.validation_split) * dataset.__len__())
-    # val_size = int(params.validation_split * dataset.__len__())
-    # train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     train_dataset, val_dataset, test_dataset = load_from_files('resources/LJSpeech-1.1/filelists', dataset)
 
     pad_collate = PadCollate()
@@ -73,15 +77,15 @@ def train(use_multiple_gpus = False):
                                  drop_last=True,
                                  num_workers=1)
 
-    tacotron2 = Tacotron2()
-
+    '''
     if use_multiple_gpus:
-        tacotron2 = nn.DataParallel(tacotron2)
+        model = nn.DataParallel(model)
+    '''
 
     if params.use_gpu:
-        tacotron2 = tacotron2.cuda()
+        model = model.cuda()
 
-    optimiser = optim.Adam(tacotron2.parameters(),
+    optimiser = optim.Adam(model.parameters(),
                            lr=params.learning_rate,
                            eps=params.epsilon,
                            weight_decay=params.weight_decay)
@@ -90,18 +94,13 @@ def train(use_multiple_gpus = False):
     criterion_stop = nn.BCEWithLogitsLoss()
 
     start_epoch = 0
-
     if params.resume_from_checkpoint:
         checkpoint = torch.load(params.checkpoint_path)
-        tacotron2.load_state_dict(checkpoint['model_state_dict'])
+        model.load_state_dict(checkpoint['model_state_dict'])
         optimiser.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch']
 
-    if params.inference:
-        inference(tacotron2)
-
-    tacotron2.train()
-
+    model.train()
     for epoch in range(start_epoch, params.epochs):
         teacher_forced_ratio = calculate_teacher_forced_ratio(epoch)
         lr = calculate_exponential_lr(epoch)
@@ -117,17 +116,7 @@ def train(use_multiple_gpus = False):
         for i, batch in enumerate(train_loader):
             print("\tBatch #" + str(i + 1) + ": ")
 
-            padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
-
-            y_pred, y_pred_post, pred_stop_tokens = tacotron2(padded_texts, text_lengths, padded_mels, teacher_forced_ratio)
-
-            for b in range(params.batch_size):
-                y_pred[b][:][mel_lengths[b]:] = 0
-                y_pred_post[b][:][mel_lengths[b]:] = 0
-                pred_stop_tokens[b][mel_lengths[b]:] = 1
-
-            loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
-                criterion_stop(pred_stop_tokens, padded_stop_tokens)
+            loss = calculate_loss(model, batch, teacher_forced_ratio, criterion, criterion_stop)
             print("\t\tThe loss is... " + str(loss.item()))
 
             print("\t\tStepping backwards...")
@@ -147,11 +136,11 @@ def train(use_multiple_gpus = False):
                 print("\tSaving model...")
                 torch.save({
                     'epoch': epoch + 1,
-                    'model_state_dict': tacotron2.state_dict(),
+                    'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimiser.state_dict()},
                     params.checkpoint_path)
-                
-            validate(tacotron2, train_loader, val_loader, criterion, criterion_stop, epoch)
+
+            validate(model, train_loader, val_loader, criterion, criterion_stop, epoch)
 
 
 @torch.no_grad()  # no need for backpropagation -> speeds up computation
@@ -163,27 +152,12 @@ def validate(model, train_loader, val_loader, criterion, criterion_stop, epoch):
     for i, batch in enumerate(train_loader):
         print("\tBatch #" + str(i + 1) + ": ")
 
-        padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
-
-        y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio=0.0)
-
-        for b in range(params.batch_size):
-            y_pred[b][:][mel_lengths[b]:] = 0
-            y_pred_post[b][:][mel_lengths[b]:] = 0
-            pred_stop_tokens[b][mel_lengths[b]:] = 1
-
-        loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
-            criterion_stop(pred_stop_tokens, padded_stop_tokens)
+        loss = calculate_loss(model, batch, 0.0, criterion, criterion_stop)
         train_loss += loss.item()
 
         print("\t\tLoss is... " + str(loss.item()))
-
-    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'Training ' + str(epoch))
-    save_mels_to_png((mel, ), ("Mel", ), "Training " + str(epoch))
-
     train_loss = train_loss / (i + 1)
 
-    # Write loss out
     with open('val_train_loss.txt', 'a+') as out:
         out.write(str(epoch) + "|" + str(train_loss) + '\n')
 
@@ -192,52 +166,16 @@ def validate(model, train_loader, val_loader, criterion, criterion_stop, epoch):
     for i, batch in enumerate(val_loader):
         print("\tBatch #" + str(i + 1) + ": ")
 
-        padded_texts, text_lengths, padded_mels, mel_lengths, padded_stop_tokens = prepare_input(batch)
-
-        y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio=0.0)
-
-        for b in range(params.batch_size):
-            y_pred[b][:][mel_lengths[b]:] = 0
-            y_pred_post[b][:][mel_lengths[b]:] = 0
-            pred_stop_tokens[b][mel_lengths[b]:] = 1
-
-        loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
-            criterion_stop(pred_stop_tokens, padded_stop_tokens)
+        loss = calculate_loss(model, batch, 0.0, criterion, criterion_stop)
         test_loss += loss.item()
 
         print("\t\tLoss is... " + str(loss.item()))
-
     test_loss = test_loss / (i + 1)
 
-    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'Test ' + str(epoch))
-    save_mels_to_png((mel, ), ("Mel", ), "Test " + str(epoch))
-
-    print("\tSaving losses to file....")
-
-    # Write loss out
     with open('val_test_loss.txt', 'a+') as out:
         out.write(str(epoch) + "|" + str(test_loss) + '\n')
 
     model.train()
-
-
-@torch.no_grad()  # no need for backpropagation -> speeds up computation
-def inference(model):
-    model.eval()
-
-    text = text_to_tensor(params.inference_text)
-    if params.use_gpu:
-        text = text.cuda()
-
-    y_pred, y_pred_post = model.inference(text)
-
-    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()), 'inference')
-    mel_post = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference post')
-
-    # save to png
-    save_mels_to_png((mel, mel_post), ("Mel", "Post"), "Inference")
-
-    sys.exit()
 
 
 if __name__ == '__main__':
@@ -253,6 +191,8 @@ if __name__ == '__main__':
             use_multiple_gpus = True
     '''
 
-    # print(calculate_teacher_forced_ratio(112))
+    set_seed(params.seed)
+
+    print(random.random())
 
     train()  # TODO: currently no way of switching between training/inference modes

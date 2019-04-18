@@ -1,3 +1,4 @@
+import random
 import os
 from os.path import join
 from pathlib import Path
@@ -14,6 +15,13 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 character_to_index = {ch: i for i, ch in enumerate(params.all_characters)}
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 
 def text_to_tensor(label):

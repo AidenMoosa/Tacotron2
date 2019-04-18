@@ -418,8 +418,6 @@ class Wavenet(nn.Module):
         outputs = F.softmax(outputs, dim=-1)
         '''
 
-
-
         return outputs
 
 

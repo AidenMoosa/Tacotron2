@@ -1,7 +1,5 @@
 # training params
 use_wavenet = False
-inference = False
-inference_text = 'Isobel likes to play in the sand.'
 should_checkpoint = True
 resume_from_checkpoint = True
 checkpoint_path = 'out/model/model.p'
@@ -12,6 +10,8 @@ batch_size = 8
 effective_batch_size = 64
 validation_split = 0.1
 seed = 42
+# inference params
+inference_text = 'Isobel likes to play in the sand, and then she will eat some tuna.'
 #
 teacher_forcing_mode = 'scheduled'  # Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
 teacher_forcing_ratio = 1.  # Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
