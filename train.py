@@ -20,7 +20,7 @@ def calculate_teacher_forced_ratio(epoch):
     alpha = params.teacher_forcing_decay_alpha
     init_tfr = params.teacher_forcing_init_ratio
 
-    global_step = (epoch - 25.6) * 390
+    global_step = (epoch - 42.6) * 390
 
     # https://www.tensorflow.org/api_docs/python/tf/train/cosine_decay
     global_step = max(0, min(global_step, decay_steps))
@@ -122,13 +122,13 @@ def train(use_multiple_gpus = False):
             y_pred, y_pred_post, pred_stop_tokens = tacotron2(padded_texts, text_lengths, padded_mels, teacher_forced_ratio)
 
             for b in range(params.batch_size):
-                y_pred[b][mel_lengths[b]:] = 0
-                y_pred_post[b][mel_lengths[b]:] = 0
+                y_pred[b][:][mel_lengths[b]:] = 0
+                y_pred_post[b][:][mel_lengths[b]:] = 0
                 pred_stop_tokens[b][mel_lengths[b]:] = 1
 
             loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
                 criterion_stop(pred_stop_tokens, padded_stop_tokens)
-            print("\t\tLoss is... " + str(loss.item()))
+            print("\t\tThe loss is... " + str(loss.item()))
 
             print("\t\tStepping backwards...")
             loss.backward()
@@ -168,8 +168,8 @@ def validate(model, train_loader, val_loader, criterion, criterion_stop, epoch):
         y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio=0.0)
 
         for b in range(params.batch_size):
-            y_pred[b][mel_lengths[b]:] = 0
-            y_pred_post[b][mel_lengths[b]:] = 0
+            y_pred[b][:][mel_lengths[b]:] = 0
+            y_pred_post[b][:][mel_lengths[b]:] = 0
             pred_stop_tokens[b][mel_lengths[b]:] = 1
 
         loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
@@ -197,8 +197,8 @@ def validate(model, train_loader, val_loader, criterion, criterion_stop, epoch):
         y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio=0.0)
 
         for b in range(params.batch_size):
-            y_pred[b][mel_lengths[b]:] = 0
-            y_pred_post[b][mel_lengths[b]:] = 0
+            y_pred[b][:][mel_lengths[b]:] = 0
+            y_pred_post[b][:][mel_lengths[b]:] = 0
             pred_stop_tokens[b][mel_lengths[b]:] = 1
 
         loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
@@ -241,6 +241,7 @@ def inference(model):
 
 
 if __name__ == '__main__':
+    '''
     use_multiple_gpus = False
 
     if len(sys.argv) > 1:
@@ -250,5 +251,8 @@ if __name__ == '__main__':
         if torch.cuda.device_count() > 1:
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             use_multiple_gpus = True
+    '''
+
+    # print(calculate_teacher_forced_ratio(112))
 
     train()  # TODO: currently no way of switching between training/inference modes

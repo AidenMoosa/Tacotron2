@@ -259,6 +259,8 @@ class Postnet(nn.Module):
     def __init__(self):
         super(Postnet, self).__init__()
 
+        # bias=False because it is encapsulated within the batch norm layer
+
         self.postnet_conv1 = nn.Conv1d(80, 512, kernel_size=5, padding=2, bias=False)
         torch.nn.init.xavier_uniform_(
             self.postnet_conv1.weight,
@@ -316,6 +318,7 @@ class ResidualBlock(nn.Module):
         self.gate_conv_layer = CausalConv1d(1, 1, 5, 1, dilation, 1, True)
 
         self.residual_conv_layer = nn.Conv1d(1, 1)
+        self.skip_conv_layer = nn.Conv1d(1, 1)  # for skip parameters
 
     def forward(self, inputs):
         filter_inputs = self.filter_conv_layer(inputs)
@@ -325,10 +328,13 @@ class ResidualBlock(nn.Module):
         gate_activation = torch.sigmoid(gate_inputs)
 
         outputs = filter_activation * gate_activation
+
         residual_outputs = self.residual_conv_layer(outputs)
         residual_outputs = residual_outputs + inputs
 
-        return outputs, residual_outputs
+        skip_outputs = self.skip_conv_layer(outputs)
+
+        return residual_outputs, skip_outputs
 
 
 class MixtureOfLogistics:
@@ -385,19 +391,34 @@ class Wavenet(nn.Module):
         self.conv_1 = nn.Conv1d(skip_channels, end_channels)
         self.conv_2 = nn.Conv1d(end_channels, classes)
 
-    def forward(self, inputs):
+    def forward(self, inputs, targets):
+        # input:
+            # inputs: [B, n_mel_channels, n_mel_frames]
+                # ground truth-aligned mel spectrograms
+            # targets: [B, n_wav_frames]
+                # ground truth wav files
+
+
         inputs = self.causal_conv(inputs)
 
-        outputs = torch.zeros((1, 1))
+        skip_outputs = inputs.new_zeros((1, 1))  # TODO: change this, it's wrong
         for residual_block in self.residual_blocks:
-            skip_inputs, inputs = residual_block(inputs)
-            outputs = outputs + skip_inputs
+            r, s = residual_block(inputs)
 
-        outputs = self.conv_1(F.relu(outputs))
+            inputs = r
+            skip_outputs = skip_outputs + s
+
+        outputs = self.conv_1(F.relu(skip_outputs))
         outputs = self.conv_2(F.relu(outputs))
+
+        # we're not using this
+        '''
         mle = MuLawExpanding(quantization_channels=256)
         outputs = mle(outputs)
         outputs = F.softmax(outputs, dim=-1)
+        '''
+
+
 
         return outputs
 

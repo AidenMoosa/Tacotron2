@@ -1,6 +1,7 @@
 # training params
+use_wavenet = False
 inference = False
-inference_text = 'Isobel likes to play in the sand'
+inference_text = 'Isobel likes to play in the sand.'
 should_checkpoint = True
 resume_from_checkpoint = True
 checkpoint_path = 'out/model/model.p'
@@ -42,7 +43,7 @@ frame_hop = 256
 window_function = 'hann'
 griffin_lim_iters = 50
 # wavenet parameters
-n_dilation_conv_layers = 30
-n_dilation_cycles = 3
+n_dilation_conv_layers = 12
+n_dilation_cycles = 2
 n_upsampling_layers = 2
 n_mol_components = 10
