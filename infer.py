@@ -20,16 +20,13 @@ def infer():
         model = model.cuda()
         text = text.cuda()
 
-    model.eval()  # batchnorm or dropout layers will work in eval model instead of training mode. https://discuss.pytorch.org/t/model-eval-vs-with-torch-no-grad/19615
+    model.eval()  # batchnorm or dropout layers will work in eval model instead of training mode. \
+                # https://discuss.pytorch.org/t/model-eval-vs-with-torch-no-grad/19615
 
     y_pred, y_pred_post = model.inference(text)
 
-    print(y_pred[0].size())
-    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred[0].cpu().detach()), 'inference')
-    mel_post = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference post')
-
-    # save to png
-    save_mels_to_png((mel, mel_post), ("Mel", "Post"), "Inference")
+    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference')
+    save_mels_to_png((mel, ), ("Mel", ), "Inference", dpi=400)
 
 
 if __name__ == '__main__':

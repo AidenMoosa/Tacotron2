@@ -182,9 +182,9 @@ def reconstruct_signal_griffin_lim(magnitude_spectrogram, fft_size, hopsamp, ite
         reconstruction_angle = np.angle(reconstruction_spectrogram)
         # Discard magnitude part of the reconstruction and use the supplied magnitude spectrogram instead.
         proposal_spectrogram = magnitude_spectrogram*np.exp(1.0j*reconstruction_angle)
-        # prev_x = x_reconstruct
+        prev_x = x_reconstruct
         x_reconstruct = istft_for_reconstruction(proposal_spectrogram, fft_size, hopsamp)
-        # diff = np.sqrt(sum((x_reconstruct - prev_x)**2)/x_reconstruct.size)
+        diff = np.sqrt(sum((x_reconstruct - prev_x)**2)/x_reconstruct.size)
         # print('Reconstruction iteration: {}/{} RMSE: {} '.format(iterations - n, iterations, diff))
     return x_reconstruct
 

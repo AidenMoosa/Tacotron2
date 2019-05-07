@@ -11,7 +11,7 @@ from audio_utilities import dynamic_range_compression
 from unidecode import unidecode
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 character_to_index = {ch: i for i, ch in enumerate(params.all_characters)}
@@ -38,10 +38,10 @@ def prepare_input(batch):
     return batch_list
 
 
-def save_mels_to_png(mels, titles, filename):
+def save_mels_to_png(mels, titles, filename, dpi=100):
     num_mels = len(mels)
 
-    plt.figure(figsize=(6.4 * num_mels, 4.8))  # TODO: see if you should clear the figures in some way
+    plt.figure(figsize=(6.4 * num_mels, 4.8), dpi=dpi)  # TODO: see if you should clear the figures in some way
 
     for i, mel in enumerate(mels):
         plt.subplot(1, num_mels, i + 1)

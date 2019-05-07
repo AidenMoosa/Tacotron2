@@ -4,7 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as D
-from audio_utilities import MuLawEncoding, MuLawExpanding
+
+import matplotlib.pyplot as plt
 
 
 class Encoder(nn.Module):
@@ -29,7 +30,8 @@ class Encoder(nn.Module):
             gain=torch.nn.init.calculate_gain('relu'))
         self.conv3_bn = nn.BatchNorm1d(params.embedding_dim)
 
-        self.lstm = nn.LSTM(params.embedding_dim, int(params.embedding_dim / 2),
+        self.lstm = nn.LSTM(input_size=params.embedding_dim,
+                            hidden_size=int(params.embedding_dim / 2),
                             batch_first=True,
                             bidirectional=True)
 
@@ -80,7 +82,7 @@ class Attention(nn.Module):
             self.lstm_output_linear_proj.weight,
             gain=torch.nn.init.calculate_gain('tanh'))
 
-        self.location_conv = nn.Conv1d(1, 32, kernel_size=31, padding=15)
+        self.location_conv = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=31, padding=15)
         torch.nn.init.xavier_uniform_(
             self.location_conv.weight,
             gain=torch.nn.init.calculate_gain('linear'))
@@ -98,11 +100,11 @@ class Attention(nn.Module):
         processed_lstm_output = self.lstm_output_linear_proj(lstm_output)
 
         attention_weights_cum = attention_weights_cum.unsqueeze(1)
-        processed_attention_weights = self.location_conv(attention_weights_cum)
-        processed_attention_weights = processed_attention_weights.transpose(1, 2)
-        processed_attention_weights = self.location_dense(processed_attention_weights)
+        location_features = self.location_conv(attention_weights_cum)
+        location_features = location_features.transpose(1, 2)
+        location_features = self.location_dense(location_features)
 
-        energies = self.e(torch.tanh(processed_lstm_output + processed_attention_weights + processed_encoder_output))
+        energies = self.e(torch.tanh(processed_lstm_output + location_features + processed_encoder_output))
         energies = energies.squeeze(-1)
 
         attention_weights = F.softmax(energies, dim=1)
@@ -128,7 +130,7 @@ class Decoder(nn.Module):
 
         self.attention = Attention()
 
-        self.lstm = nn.LSTM(256 + 512, 1024, num_layers=2)
+        self.lstm = nn.LSTM(input_size=256 + 512, hidden_size=1024, num_layers=2, batch_first=True, bidirectional=False)
 
         self.linear_proj = nn.Linear(1024 + 512, 80)
         torch.nn.init.xavier_uniform_(
@@ -154,6 +156,8 @@ class Decoder(nn.Module):
         #
         predicted_mel = padded_mels.new_zeros((inputs.size(0), 80))
 
+        alignments = []
+
         # decoder loop
         predicted_mels, stop_tokens = [], []
         for decoder_step in range(padded_mels.size(-1) - 1):
@@ -170,13 +174,15 @@ class Decoder(nn.Module):
 
             #
             lstm_input = torch.cat((prev_mel, attention_context), dim=-1).unsqueeze(1)
-            lstm_output, _ = self.lstm(lstm_input)
+            lstm_output, (h_n, c_n) = self.lstm(lstm_input)
 
             #
             attention_context, attention_weights = self.attention(inputs,
                                                                   processed_encoder_output,
                                                                   lstm_output,
                                                                   attention_weights_cum)
+
+            alignments.append(attention_weights.cpu().detach()[0])
             attention_weights_cum = attention_weights_cum + attention_weights
 
             #
@@ -192,6 +198,10 @@ class Decoder(nn.Module):
             stop_token = stop_token.squeeze(-1)
             stop_token = stop_token.squeeze(-1)
             stop_tokens.append(stop_token)
+
+        #a = torch.stack(alignments)
+        #plt.imshow(a, cmap='hot', interpolation='nearest')
+        #plt.show()
 
         mel_output = torch.stack(predicted_mels)
         mel_output = mel_output.transpose(0, 1)
@@ -223,7 +233,7 @@ class Decoder(nn.Module):
 
             #
             lstm_input = torch.cat((prev_mel, attention_context), dim=-1).unsqueeze(1)
-            lstm_output, _ = self.lstm(lstm_input)
+            lstm_output, (h_n, c_n) = self.lstm(lstm_input)
 
             #
             attention_context, attention_weights = self.attention(encoder_output,
@@ -244,7 +254,7 @@ class Decoder(nn.Module):
             stop_token = torch.sigmoid(self.stop_dense(decoder_output))
             decoder_steps = decoder_steps + 1
 
-            if stop_token[0, 0, 0] > 0.5 or decoder_steps > 500:  # TODO: remove limit on decoder steps
+            if stop_token[0, 0, 0] > 1.0 or decoder_steps > params.decoder_step_limit:
                 break
 
             print("Decoder step #" + str(decoder_steps) + ": " + str(stop_token))
@@ -397,7 +407,6 @@ class Wavenet(nn.Module):
                 # ground truth-aligned mel spectrograms
             # targets: [B, n_wav_frames]
                 # ground truth wav files
-
 
         inputs = self.causal_conv(inputs)
 

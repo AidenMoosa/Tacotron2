@@ -19,8 +19,8 @@ def save_mel_to_wav(mel_spectrogram, filename='out'):
     stft_modified = inverted_mel_to_linear_freq_spectrogram.T
 
     # Clip values to avoid artifacts
-    stft_modified[stft_modified > 0.05] = 0
-    #stft_modified = np.clip(stft_modified, a_min=None, a_max=0.05)
+    # stft_modified[stft_modified > 0.05] = 0
+    # stft_modified = np.clip(stft_modified, a_min=None, a_max=0.05)
 
     # Use the Griffin&Lim algorithm to reconstruct an audio signal from the
     # magnitude spectrogram.

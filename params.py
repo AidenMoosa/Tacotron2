@@ -11,7 +11,8 @@ effective_batch_size = 64
 validation_split = 0.1
 seed = 42
 # inference params
-inference_text = 'Isobel likes to play in the sand, and then she will eat some tuna.'
+inference_text = 'The overwhelming majority of people in this country know how to sift the wheat from the chaff in what they hear and what they read.'
+decoder_step_limit = 500
 #
 teacher_forcing_mode = 'scheduled'  # Can be ('constant' or 'scheduled'). 'scheduled' mode applies a cosine teacher forcing ratio decay. (Preference: scheduled)
 teacher_forcing_ratio = 1.  # Value from [0., 1.], 0.=0%, 1.=100%, determines the % of times we force next decoder inputs, Only relevant if mode='constant'
@@ -41,7 +42,7 @@ f_max = 7600
 n_fft = 1024
 frame_hop = 256
 window_function = 'hann'
-griffin_lim_iters = 50
+griffin_lim_iters = 200
 # wavenet parameters
 n_dilation_conv_layers = 12
 n_dilation_cycles = 2
