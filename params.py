@@ -41,8 +41,7 @@ f_min = 125
 f_max = 7600
 n_fft = 1024
 frame_hop = 256
-window_function = 'hann'
-griffin_lim_iters = 200
+griffin_lim_iters = 50
 # wavenet parameters
 n_dilation_conv_layers = 12
 n_dilation_cycles = 2

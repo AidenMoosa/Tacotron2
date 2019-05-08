@@ -97,10 +97,13 @@ class Attention(nn.Module):
             gain=torch.nn.init.calculate_gain('linear'))
 
     def forward(self, encoder_output, processed_encoder_output, lstm_output, attention_weights_cum):
+        # OUTPUT:
+          # attention_context: (B, 1, embedding_dim)
+          # attention_weights: (B, MAX_LENGTH)
+
         processed_lstm_output = self.lstm_output_linear_proj(lstm_output)
 
-        attention_weights_cum = attention_weights_cum.unsqueeze(1)
-        location_features = self.location_conv(attention_weights_cum)
+        location_features = self.location_conv(attention_weights_cum.unsqueeze(1))
         location_features = location_features.transpose(1, 2)
         location_features = self.location_dense(location_features)
 
@@ -108,9 +111,7 @@ class Attention(nn.Module):
         energies = energies.squeeze(-1)
 
         attention_weights = F.softmax(energies, dim=1)
-        attention_weights = attention_weights.unsqueeze(1)
-        attention_context = torch.bmm(attention_weights, encoder_output)
-        attention_weights = attention_weights.squeeze(1)
+        attention_context = torch.bmm(attention_weights.unsqueeze(1), encoder_output)
 
         return attention_context, attention_weights
 
@@ -119,11 +120,11 @@ class Decoder(nn.Module):
     def __init__(self):
         super(Decoder, self).__init__()
 
-        self.prenet_dense1 = nn.Linear(80, 256, bias=False)
+        self.prenet_dense1 = nn.Linear(in_features=80, out_features=256, bias=False)
         torch.nn.init.xavier_uniform_(
             self.prenet_dense1.weight,
             gain=torch.nn.init.calculate_gain('relu'))
-        self.prenet_dense2 = nn.Linear(256, 256, bias=False)
+        self.prenet_dense2 = nn.Linear(in_features=256, out_features=256, bias=False)
         torch.nn.init.xavier_uniform_(
             self.prenet_dense2.weight,
             gain=torch.nn.init.calculate_gain('relu'))
@@ -143,26 +144,22 @@ class Decoder(nn.Module):
             gain=torch.nn.init.calculate_gain('sigmoid'))
 
     def forward(self, inputs, padded_mels, teacher_forced_ratio=1.0):
-        # can do this before
+        # project encoded input to latent space
         processed_encoder_output = self.attention.encoder_output_linear_proj(inputs)
 
-        #
+        # zero initialise required variables
         attention_weights_cum = padded_mels.new_zeros((inputs.size(0), inputs.size(1)))
-        attention_context = padded_mels.new_zeros((inputs.size(0), params.embedding_dim))
+        lstm_output = padded_mels.new_zeros((inputs.size(0), 1, 1024))
 
         # prepend dummy mel frame
-        padded_mels = torch.cat((padded_mels.new_zeros((inputs.size(0), 80, 1)), padded_mels), dim=-1)
-
-        #
-        predicted_mel = padded_mels.new_zeros((inputs.size(0), 80))
-
-        alignments = []
+        padded_mels = torch.cat((padded_mels.new_zeros((inputs.size(0), 1, 80)), padded_mels), dim=1)
 
         # decoder loop
+        predicted_mel = padded_mels.new_zeros((inputs.size(0), 80))
         predicted_mels, stop_tokens = [], []
-        for decoder_step in range(padded_mels.size(-1) - 1):
+        for decoder_step in range(padded_mels.size(1) - 1):
             # grab previous mel frame as decoder input
-            prev_mel = padded_mels[:, :, decoder_step]
+            prev_mel = padded_mels[:, decoder_step, :]
 
             # using teacher-forced ratio to speed convergence
             if random.random() > teacher_forced_ratio:
@@ -173,35 +170,26 @@ class Decoder(nn.Module):
             prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
 
             #
-            lstm_input = torch.cat((prev_mel, attention_context), dim=-1).unsqueeze(1)
-            lstm_output, (h_n, c_n) = self.lstm(lstm_input)
-
-            #
             attention_context, attention_weights = self.attention(inputs,
                                                                   processed_encoder_output,
                                                                   lstm_output,
                                                                   attention_weights_cum)
-
-            alignments.append(attention_weights.cpu().detach()[0])
             attention_weights_cum = attention_weights_cum + attention_weights
 
             #
-            decoder_output = torch.cat((lstm_output, attention_context), dim=-1)
-            attention_context = attention_context.squeeze(1)
+            lstm_input = torch.cat((prev_mel.unsqueeze(1), attention_context), dim=-1)
+            lstm_output, _ = self.lstm(lstm_input)
+
+            #
+            decoder_output = torch.cat((lstm_output, attention_context), dim=-1).squeeze(1)
 
             predicted_mel = self.linear_proj(decoder_output)
-            predicted_mel = predicted_mel.squeeze(1)
             predicted_mels.append(predicted_mel)
 
             # stop token prediction
             stop_token = self.stop_dense(decoder_output)
-            stop_token = stop_token.squeeze(-1)
-            stop_token = stop_token.squeeze(-1)
+            stop_token = stop_token.squeeze(1)
             stop_tokens.append(stop_token)
-
-        #a = torch.stack(alignments)
-        #plt.imshow(a, cmap='hot', interpolation='nearest')
-        #plt.show()
 
         mel_output = torch.stack(predicted_mels)
         mel_output = mel_output.transpose(0, 1)
@@ -455,7 +443,7 @@ class Tacotron2(nn.Module):
         postnet_outputs = self.postnet(decoder_outputs)
         postnet_outputs = postnet_outputs + decoder_outputs
 
-        return decoder_outputs, postnet_outputs, stop_tokens
+        return decoder_outputs.transpose(1, 2), postnet_outputs.transpose(1, 2), stop_tokens
 
     def inference(self, text):
         text = text.unsqueeze(0)
@@ -471,4 +459,4 @@ class Tacotron2(nn.Module):
         postnet_outputs = self.postnet(decoder_outputs)
         postnet_outputs = postnet_outputs + decoder_outputs
 
-        return decoder_outputs, postnet_outputs
+        return decoder_outputs.transpose(1, 2), postnet_outputs.transpose(1, 2)

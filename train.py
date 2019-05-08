@@ -1,5 +1,6 @@
 import params
-from data import LabelledMelDataset, PadCollate, LJSpeechLoader, prepare_input, load_from_files, set_seed, save_mels_to_png
+from data import LabelledMelDataset, PadCollate, LJSpeechLoader, prepare_input, load_from_files, set_seed, \
+    save_mels_to_png, dynamic_range_decompression
 from griffin_lim import save_mel_to_wav
 from model import Tacotron2
 import torch
@@ -7,7 +8,6 @@ from torch import optim
 from torch.utils import data
 import torch.nn as nn
 import math
-from audio_utilities import dynamic_range_decompression
 import griffin_lim
 
 
@@ -46,16 +46,19 @@ def calculate_loss(model, batch, teacher_forced_ratio, criterion, criterion_stop
     y_pred, y_pred_post, pred_stop_tokens = model(padded_texts, text_lengths, padded_mels, teacher_forced_ratio)
 
     for b in range(params.batch_size):
-        y_pred[b][:][mel_lengths[b]:] = 0
-        y_pred_post[b][:][mel_lengths[b]:] = 0
+        y_pred[b][mel_lengths[b]:][:] = 0
+        y_pred_post[b][mel_lengths[b]:][:] = 0
         pred_stop_tokens[b][mel_lengths[b]:] = 1
 
     loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
         criterion_stop(pred_stop_tokens, padded_stop_tokens)
 
-    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'BIG OLD TEST')
-    save_mels_to_png((mel, ), ("Title", ), "zzzz")
-    save_mel_to_wav(mel, "zzz")
+    '''
+    mels = dynamic_range_decompression(y_pred_post)
+    out_mel = mels.detach().cpu().numpy()[0].T
+    save_mels_to_png((out_mel, ), ("Title", ), "zzzz")
+    save_mel_to_wav(out_mel, "zzz")
+    '''
 
     return loss
 
@@ -108,17 +111,18 @@ def train(use_multiple_gpus=False):
 
     model.train()
     for epoch in range(start_epoch, params.epochs):
-        teacher_forced_ratio = calculate_teacher_forced_ratio(epoch)
-        teacher_forced_ratio = 0.25
-        lr = calculate_exponential_lr(epoch)
+        # teacher_forced_ratio = calculate_teacher_forced_ratio(epoch)
+        teacher_forced_ratio = 1.0
+        # lr = calculate_exponential_lr(epoch)
+        lr = params.learning_rate
+        for g in optimiser.param_groups:
+            g['lr'] = lr
 
         print("Epoch #" + str(epoch) + ":")
         print("\tTraining model...")
 
-        # TODO: start decay after 256 epochs
-        # from stack overflow
-        #for g in optimiser.param_groups:
-            #g['lr'] = lr
+        print("\tTeacher forced ratio: " + str(teacher_forced_ratio))
+        print("\tLearning rate: " + str(lr))
 
         for i, batch in enumerate(train_loader):
             print("\tBatch #" + str(i + 1) + ": ")
@@ -199,7 +203,5 @@ if __name__ == '__main__':
     '''
 
     set_seed(params.seed)
-
-    print(calculate_teacher_forced_ratio(145))
 
     train()

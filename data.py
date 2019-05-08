@@ -7,7 +7,6 @@ import torch
 from torch.utils.data import Dataset, Subset
 import librosa
 from librosa.display import specshow
-from audio_utilities import dynamic_range_compression
 from unidecode import unidecode
 import numpy as np
 import matplotlib
@@ -76,11 +75,20 @@ def parse_filelist(filename):
     return stems
 
 
+def dynamic_range_compression(mel, compression_factor=1):
+    return np.log(np.clip(mel, a_min=0.01, a_max=None) * compression_factor)
+
+
+def dynamic_range_decompression(mel, compression_factor=1):
+    return torch.exp(mel) / compression_factor
+
+
 class LabelledMelDataset(Dataset):
     def __init__(self, data_dir, loader_fn):
+        self.mel_filterbank = librosa.filters.mel(sr=params.sampling_rate, n_fft=params.n_fft,
+                                                  n_mels=params.n_mel_channels, fmin=params.f_min, fmax=params.f_max)
+
         self.paths, self.labels = loader_fn(data_dir)
-        self.mel_filterbank = librosa.filters.mel(sr=22050, n_fft=params.n_fft, n_mels=params.n_mel_channels,
-                                                  fmin=params.f_min, fmax=params.f_max)
 
         self.stem_to_idx = {p.stem: i for i, p in enumerate(self.paths)}
 
@@ -103,7 +111,7 @@ class LabelledMelDataset(Dataset):
 
         mel = dynamic_range_compression(mel)
 
-        return mel.real
+        return mel
 
     def __getitem__(self, idx):
         text = self.label_to_list(self.labels[idx])
@@ -146,7 +154,7 @@ class PadCollate:
             padded_stop_tokens[i][mel_lengths[i]:] = 1
 
         return torch.stack(padded_texts), torch.LongTensor(text_lengths), \
-            torch.stack(padded_mels), torch.LongTensor(mel_lengths),\
+            torch.stack(padded_mels).transpose(1, 2), torch.LongTensor(mel_lengths),\
             torch.stack(padded_stop_tokens)
 
 
@@ -165,42 +173,3 @@ class LJSpeechLoader:
                 labels.append(label)
 
         return paths, labels
-
-'''
-class LibriSpeechLoader:
-    def __init__(self):
-        pass
-
-    def __call__(self, root_dir):
-        paths, labels = [], []
-        for root, dirs, files in os.walk(root_dir, topdown=True):
-            for path in files:
-                if path.endswith('.txt'):
-                    with open(os.path.join(root, path)) as file:
-                        string = ''
-                        in_name = True
-
-                        while True:
-                            c = file.read(1)
-                            if not c:
-                                string = string.strip()
-                                labels.append(string)
-                                break
-
-                            if in_name:
-                                if c.isspace():
-                                    in_name = False
-                                    string = string.strip()
-                                    paths.append(os.path.join(root, string) + ".flac")
-                                    string = ''
-                            else:
-                                if c.isdigit():
-                                    in_name = True
-                                    string = string.strip()
-                                    labels.append(string)
-                                    string = ''
-
-                            string += c
-
-        return paths, labels
-'''

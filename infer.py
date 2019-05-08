@@ -1,9 +1,8 @@
 import torch
 from model import Tacotron2
-from data import text_to_tensor, save_mels_to_png, set_seed
+from data import text_to_tensor, save_mels_to_png, set_seed, dynamic_range_decompression
 import params
 import griffin_lim
-from audio_utilities import dynamic_range_decompression
 
 
 @torch.no_grad()  # no need for backpropagation -> speeds up computation
@@ -25,7 +24,9 @@ def infer():
 
     y_pred, y_pred_post = model.inference(text)
 
-    mel = griffin_lim.save_mel_to_wav(dynamic_range_decompression(y_pred_post[0].cpu().detach()), 'inference')
+    mels = dynamic_range_decompression(y_pred_post)
+    mel = mels.detach().cpu().numpy()[0].T
+    griffin_lim.save_mel_to_wav(mel, "inference")
     save_mels_to_png((mel, ), ("Mel", ), "Inference", dpi=400)
 
 
