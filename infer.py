@@ -1,7 +1,7 @@
+import params
 import torch
 from model import Tacotron2
 from data import text_to_tensor, save_mels_to_png, set_seed, dynamic_range_decompression
-import params
 import griffin_lim
 
 
@@ -9,7 +9,6 @@ import griffin_lim
 def infer():
     model = Tacotron2()
 
-    #
     checkpoint = torch.load(params.checkpoint_path)
     model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -19,14 +18,15 @@ def infer():
         model = model.cuda()
         text = text.cuda()
 
-    model.eval()  # batchnorm or dropout layers will work in eval model instead of training mode. \
+    model.eval()  # batchnorm or dropout layers will work in eval mode instead of training mode. \
                 # https://discuss.pytorch.org/t/model-eval-vs-with-torch-no-grad/19615
 
     y_pred, y_pred_post = model.inference(text)
 
+    # export to png/wav
     mels = dynamic_range_decompression(y_pred_post)
     mel = mels.detach().cpu().numpy()[0].T
-    griffin_lim.save_mel_to_wav(mel, "inference")
+    griffin_lim.save_mel_to_wav(mel, "Inference")
     save_mels_to_png((mel, ), ("Mel", ), "Inference", dpi=400)
 
 

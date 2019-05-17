@@ -197,6 +197,8 @@ def save_audio_to_file(x, sample_rate, outfile='out.wav'):
         outfile: Name of the file to save.
 
     """
+    print(np.max(x))
+    print(np.min(x))
     x_max = np.max(abs(x))
     assert x_max <= 1.0, 'Input audio value is out of range. Should be in the range [-1.0, 1.0].'
     x /= x_max

@@ -1,17 +1,20 @@
-import random
+import params
 import os
+import random
+import torch
+import librosa
+import numpy as np
+
 from os.path import join
 from pathlib import Path
-import params
-import torch
 from torch.utils.data import Dataset, Subset
-import librosa
 from librosa.display import specshow
 from unidecode import unidecode
-import numpy as np
+
 import matplotlib
-# matplotlib.use('Agg')
+# matplotlib.use('Agg') # uncomment this on the GPUs
 import matplotlib.pyplot as plt
+
 
 character_to_index = {ch: i for i, ch in enumerate(params.all_characters)}
 
@@ -40,7 +43,7 @@ def prepare_input(batch):
 def save_mels_to_png(mels, titles, filename, dpi=100):
     num_mels = len(mels)
 
-    plt.figure(figsize=(6.4 * num_mels, 4.8), dpi=dpi)  # TODO: see if you should clear the figures in some way
+    plt.figure(figsize=(6.4 * num_mels, 4.8), dpi=dpi)
 
     for i, mel in enumerate(mels):
         plt.subplot(1, num_mels, i + 1)
@@ -49,7 +52,6 @@ def save_mels_to_png(mels, titles, filename, dpi=100):
         plt.xlabel('Frame')
         plt.ylabel('Frequency Bin Index')
         plt.colorbar()
-        # TODO: make heatmap values uniform
 
     plt.savefig(join(params.mel_out_path, filename + '.png'), bbox_inches='tight', dpi=128)
 
@@ -123,11 +125,11 @@ class LabelledMelDataset(Dataset):
         return len(self.paths)
 
 
-# ideas taken from https://discuss.pytorch.org/t/dataloader-for-various-length-of-data/6418/8
 class PadCollate:
     def __init__(self):
         pass
 
+    # ideas taken from https://discuss.pytorch.org/t/dataloader-for-various-length-of-data/6418/8
     def pad_tensor(self, tensor, target_len, dim=-1):
         pad_shape = list(tensor.shape)
         pad_shape[dim] = target_len - tensor.size(dim)

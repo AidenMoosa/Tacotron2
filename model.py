@@ -5,8 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as D
 
-import matplotlib.pyplot as plt
-
 
 class Encoder(nn.Module):
     def __init__(self):
@@ -54,6 +52,7 @@ class Encoder(nn.Module):
         inputs = F.dropout(F.relu(self.conv1_bn(self.conv1(embedded_input))), 0.5, self.training)
         inputs = F.dropout(F.relu(self.conv2_bn(self.conv2(inputs))), 0.5, self.training)
         inputs = F.dropout(F.relu(self.conv3_bn(self.conv3(inputs))), 0.5, self.training)
+        # (B, embedding_dim, MAX_LENGTH) -> (B, MAX_LENGTH, embedding_dim)
         inputs = inputs.transpose(1, 2)
 
         self.lstm.flatten_parameters()
@@ -96,21 +95,62 @@ class Attention(nn.Module):
             self.e.weight,
             gain=torch.nn.init.calculate_gain('linear'))
 
-    def forward(self, encoder_output, processed_encoder_output, lstm_output, attention_weights_cum):
+    def forward(self, encoder_output, text_lengths, processed_encoder_output, lstm_output, attention_weights_cum):
+        # INPUT:
+          # encoder_output: (B, MAX_LENGTH, embedding_dim)
+          # processed encoder_output: (B, MAX_LENGTH, attention_dim)
+          # lstm_output: (B, 1, 1024)
+          # attention_weights_cum: (B, MAX_LENGTH)
         # OUTPUT:
           # attention_context: (B, 1, embedding_dim)
           # attention_weights: (B, MAX_LENGTH)
 
+        # (B, 1, 1024) -> (B, 1, attention_dim)
         processed_lstm_output = self.lstm_output_linear_proj(lstm_output)
 
+        # (B, (1), MAX_LENGTH) -> (B, 32, MAX_LENGTH)
         location_features = self.location_conv(attention_weights_cum.unsqueeze(1))
         location_features = location_features.transpose(1, 2)
+        # (B, MAX_LENGTH, 32) -> (B, MAX_LENGTH, attention_dim)
         location_features = self.location_dense(location_features)
 
         energies = self.e(torch.tanh(processed_lstm_output + location_features + processed_encoder_output))
         energies = energies.squeeze(-1)
 
-        attention_weights = F.softmax(energies, dim=1)
+        for i in range(encoder_output.size(0)):
+            energies[i, text_lengths[i]:] = float('-inf')
+
+        attention_weights = F.softmax(energies, dim=-1)
+
+        # (B, 1, MAX_LENGTH) * (B, MAX_LENGTH, embedding_dim) -> (B, 1, embedding_dim)
+        attention_context = torch.bmm(attention_weights.unsqueeze(1), encoder_output)
+
+        return attention_context, attention_weights
+
+    def inference(self, encoder_output, processed_encoder_output, lstm_output, attention_weights_cum):
+        # INPUT:
+          # encoder_output: (B, MAX_LENGTH, embedding_dim)
+          # processed encoder_output: (B, MAX_LENGTH, attention_dim)
+          # lstm_output: (B, 1, 1024)
+          # attention_weights_cum: (B, MAX_LENGTH)
+        # OUTPUT:
+          # attention_context: (B, 1, embedding_dim)
+          # attention_weights: (B, MAX_LENGTH)
+
+        # (B, 1, 1024) -> (B, 1, attention_dim)
+        processed_lstm_output = self.lstm_output_linear_proj(lstm_output)
+
+        # (B, (1), MAX_LENGTH) -> (B, 32, MAX_LENGTH)
+        location_features = self.location_conv(attention_weights_cum.unsqueeze(1))
+        location_features = location_features.transpose(1, 2)
+        # (B, MAX_LENGTH, 32) -> (B, MAX_LENGTH, attention_dim)
+        location_features = self.location_dense(location_features)
+
+        energies = self.e(torch.tanh(processed_lstm_output + location_features + processed_encoder_output))
+        energies = energies.squeeze(-1)
+
+        attention_weights = F.softmax(energies, dim=-1)
+        # (B, 1, MAX_LENGTH) * (B, MAX_LENGTH, embedding_dim) -> (B, 1, embedding_dim)
         attention_context = torch.bmm(attention_weights.unsqueeze(1), encoder_output)
 
         return attention_context, attention_weights
@@ -143,7 +183,7 @@ class Decoder(nn.Module):
             self.stop_dense.weight,
             gain=torch.nn.init.calculate_gain('sigmoid'))
 
-    def forward(self, inputs, padded_mels, teacher_forced_ratio=1.0):
+    def forward(self, inputs, text_lengths, padded_mels, teacher_forced_ratio=1.0):
         # project encoded input to latent space
         processed_encoder_output = self.attention.encoder_output_linear_proj(inputs)
 
@@ -157,11 +197,12 @@ class Decoder(nn.Module):
         # decoder loop
         predicted_mel = padded_mels.new_zeros((inputs.size(0), 80))
         predicted_mels, stop_tokens = [], []
+        attention_weights_list = []
         for decoder_step in range(padded_mels.size(1) - 1):
             # grab previous mel frame as decoder input
             prev_mel = padded_mels[:, decoder_step, :]
 
-            # using teacher-forced ratio to speed convergence
+            # experimental: using teacher-forced ratio to speed convergence
             if random.random() > teacher_forced_ratio:
                 prev_mel = predicted_mel
 
@@ -171,16 +212,50 @@ class Decoder(nn.Module):
 
             #
             attention_context, attention_weights = self.attention(inputs,
+                                                                  text_lengths,
                                                                   processed_encoder_output,
                                                                   lstm_output,
                                                                   attention_weights_cum)
+
+            # evaluation code
+            '''
+            # for moving gaussian alignment
+            ratio = padded_mels.size(1)/attention_weights.size(1)
+            attention_weights = torch.zeros(attention_weights.size())
+
+            # for random alignment
+            # attention_weights = torch.rand(attention_weights.size())
+            # attention_weights = F.softmax(attention_weights, dim=-1)
+
+            # for either alignment
+            attention_weights = attention_weights.cuda()
+
+            # for moving gaussian alignment
+            for b in range(params.batch_size):
+                if decoder_step/ratio < text_lengths[b]:
+                    if int(decoder_step/ratio) != 0:
+                        attention_weights[b][int(decoder_step / ratio)-1] = 0.25
+
+                    attention_weights[b][int(decoder_step/ratio)] = 0.5
+
+                    if int(decoder_step/ratio) != attention_weights.size(1) - 1:
+                        attention_weights[b][int(decoder_step / ratio)+1] = 0.25
+
+            # for either alignment
+            attention_context = torch.bmm(attention_weights.unsqueeze(1), inputs)
+            '''
+
             attention_weights_cum = attention_weights_cum + attention_weights
 
-            #
+            # evaluation code
+            attention_weights_list.append(attention_weights)
+
+            # (B, 1, 256 + 512)
             lstm_input = torch.cat((prev_mel.unsqueeze(1), attention_context), dim=-1)
+            # (B, 1, 1024)
             lstm_output, _ = self.lstm(lstm_input)
 
-            #
+            # (B, 1024 + embedding_dim)
             decoder_output = torch.cat((lstm_output, attention_context), dim=-1).squeeze(1)
 
             predicted_mel = self.linear_proj(decoder_output)
@@ -191,6 +266,16 @@ class Decoder(nn.Module):
             stop_token = stop_token.squeeze(1)
             stop_tokens.append(stop_token)
 
+        # evaluation code
+        '''
+        attention_weights_t = torch.stack(attention_weights_list)
+        attention_weights_t = attention_weights_t.transpose(0, 1)
+        attention_weights_t = attention_weights_t.transpose(1, 2)
+
+        specshow(attention_weights_t.detach().cpu().numpy()[0], cmap=plt.cm.viridis)
+        plt.show()
+        '''
+
         mel_output = torch.stack(predicted_mels)
         mel_output = mel_output.transpose(0, 1)
 
@@ -200,52 +285,48 @@ class Decoder(nn.Module):
         return mel_output, stop_tokens_t
 
     def inference(self, encoder_output):
-        # can do this before
+        # INPUT:
+        #  encoder_output: (B, MAX_LENGTH, embedding_dim)
+
+        # only slight changes to the training code
+
         processed_encoder_output = self.attention.encoder_output_linear_proj(encoder_output)
 
-        #
         attention_weights_cum = encoder_output.new_zeros((encoder_output.size(0), encoder_output.size(1)))
-        attention_context = encoder_output.new_zeros((encoder_output.size(0), params.embedding_dim))
-
-        # prepend dummy mel frame
+        lstm_output = encoder_output.new_zeros((encoder_output.size(0), 1, 1024))
         prev_mel = encoder_output.new_zeros((encoder_output.size(0), 80))
 
-        # decoder loop
-        predicted_mels = [prev_mel]
-        decoder_steps = 0
+        predicted_mels = []
+        decoder_step = 0
         while True:
-            # convert mel frame into model-readable format
-            prev_mel = predicted_mels[decoder_steps]
             prev_mel = F.dropout(F.relu(self.prenet_dense1(prev_mel)), p=0.5)
             prev_mel = F.dropout(F.relu(self.prenet_dense2(prev_mel)), p=0.5)
 
             #
-            lstm_input = torch.cat((prev_mel, attention_context), dim=-1).unsqueeze(1)
-            lstm_output, (h_n, c_n) = self.lstm(lstm_input)
-
-            #
-            attention_context, attention_weights = self.attention(encoder_output,
-                                                                  processed_encoder_output,
-                                                                  lstm_output,
-                                                                  attention_weights_cum)
+            attention_context, attention_weights = self.attention.inference(encoder_output,
+                                                                            processed_encoder_output,
+                                                                            lstm_output,
+                                                                            attention_weights_cum)
             attention_weights_cum = attention_weights_cum + attention_weights
 
             #
-            decoder_output = torch.cat((lstm_output, attention_context), dim=-1)
-            attention_context = attention_context.squeeze(1)
+            lstm_input = torch.cat((prev_mel.unsqueeze(1), attention_context), dim=-1)
+            lstm_output, _ = self.lstm(lstm_input)
+
+            decoder_output = torch.cat((lstm_output, attention_context), dim=-1).squeeze(1)
 
             predicted_mel = self.linear_proj(decoder_output)
-            predicted_mel = predicted_mel.squeeze(1)
             predicted_mels.append(predicted_mel)
+            prev_mel = predicted_mel
 
             # stop token prediction
             stop_token = torch.sigmoid(self.stop_dense(decoder_output))
-            decoder_steps = decoder_steps + 1
+            decoder_step = decoder_step + 1
 
-            if stop_token[0, 0, 0] > 1.0 or decoder_steps > params.decoder_step_limit:
+            if decoder_step > params.decoder_step_limit:  # should be stop_token[0, 0] > 0.5
                 break
 
-            print("Decoder step #" + str(decoder_steps) + ": " + str(stop_token))
+            print("Decoder step #" + str(decoder_step) + ": " + str(stop_token))
 
         mel_output = torch.stack(predicted_mels)
         mel_output = mel_output.transpose(0, 1)
@@ -299,7 +380,8 @@ class CausalConv1d(torch.nn.Conv1d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1, bias=True):
         self.__padding = (kernel_size - 1) * dilation
 
-        super(CausalConv1d, self).__init__( in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=self.__padding, dilation=dilation, groups=groups, bias=bias)
+        super(CausalConv1d, self).__init__(in_channels, out_channels, kernel_size=kernel_size, stride=stride,
+                                           padding=self.__padding, dilation=dilation, groups=groups, bias=bias)
 
     def forward(self, inputs):
         result = super(CausalConv1d, self).forward(inputs)
@@ -312,11 +394,11 @@ class ResidualBlock(nn.Module):
     def __init__(self, dilation):
         super(ResidualBlock, self).__init__()
 
-        self.filter_conv_layer = CausalConv1d(1, 1, 5, 1, dilation, 1, True)
-        self.gate_conv_layer = CausalConv1d(1, 1, 5, 1, dilation, 1, True)
+        self.filter_conv_layer = CausalConv1d(in_channels=1, out_channels=1, kernel_size=5, dilation=dilation, bias=True)
+        self.gate_conv_layer = CausalConv1d(in_channels=1, out_channels=1, kernel_size=5, dilation=dilation, bias=True)
 
-        self.residual_conv_layer = nn.Conv1d(1, 1)
-        self.skip_conv_layer = nn.Conv1d(1, 1)  # for skip parameters
+        self.residual_conv_layer = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=1)
+        self.skip_conv_layer = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=1)  # for skip parameters
 
     def forward(self, inputs):
         filter_inputs = self.filter_conv_layer(inputs)
@@ -355,12 +437,12 @@ class MixtureOfLogistics:
         #   targets: B x 1
         #   weights: B x N_MOL_COMP x 3 (mix, loc, scale)
 
-        # Initialise distributions from weights
+        # initialise distributions from weights
         distributions = [[self.create_logistic_distribution(weights[b][n][1], weights[b][n][2])
                           for n in range(weights.size(1))]
                          for b in range(weights.size(0))]
 
-        # Calculate log probs of mixture distribution given targets
+        # calculate log probs of mixture distribution given targets
         log_probs = torch.tensor([[distributions[b][n].log_prob(targets[b]) * weights[b][n][0]
                                   for n in range(weights.size(1))]
                                  for b in range(weights.size(0))])
@@ -368,14 +450,15 @@ class MixtureOfLogistics:
         return -torch.sum(log_probs, dim=1)
 
 
+# you may notice a lot of 1s, these are placeholders for when I can hopefully get some training done on WaveNet
 class Wavenet(nn.Module):
     def __init__(self, skip_channels=1, end_channels=1, classes=1):
         super(Wavenet, self).__init__()
 
-        # We need to create the mixture of logistic distributions to sample from (parameters are generated later)
+        # we need to create the mixture of logistic distributions to sample from (parameters are generated later)
         self.MoL = MixtureOfLogistics(params.n_mol_components)
 
-        # We want to upsample the mel spectrogram to align it with the desired 16-bit 24KHz model --
+        # we want to upsample the mel spectrogram to align it with the desired 16-bit 24KHz model ---
         # Tacotron 2 paper specifies 2 upsampling layers
         self.t_conv_1 = nn.ConvTranspose1d(in_channels=1, out_channels=1)
         self.t_conv_2 = nn.ConvTranspose1d(in_channels=1, out_channels=1)
@@ -398,7 +481,7 @@ class Wavenet(nn.Module):
 
         inputs = self.causal_conv(inputs)
 
-        skip_outputs = inputs.new_zeros((1, 1))  # TODO: change this, it's wrong
+        skip_outputs = inputs.new_zeros((1, 1))
         for residual_block in self.residual_blocks:
             r, s = residual_block(inputs)
 
@@ -408,7 +491,7 @@ class Wavenet(nn.Module):
         outputs = self.conv_1(F.relu(skip_outputs))
         outputs = self.conv_2(F.relu(outputs))
 
-        # we're not using this
+        # we're not using this (unmodified WaveNet)
         '''
         mle = MuLawExpanding(quantization_channels=256)
         outputs = mle(outputs)
@@ -423,21 +506,19 @@ class Tacotron2(nn.Module):
         super(Tacotron2, self).__init__()
 
         self.embedding = nn.Embedding(params.n_characters, params.embedding_dim)
-        # experimental
         torch.nn.init.xavier_normal_(self.embedding.weight)
+
         self.encoder = Encoder()
         self.decoder = Decoder()
         self.postnet = Postnet()
 
     def forward(self, padded_texts, text_lengths, padded_mels, teacher_forced_ratio=1.0):
-        text_lengths = text_lengths.data
-
         embedded_inputs = self.embedding(padded_texts)
         embedded_inputs = embedded_inputs.transpose(1, 2)
 
         encoder_outputs = self.encoder(embedded_inputs, text_lengths)
 
-        decoder_outputs, stop_tokens = self.decoder(encoder_outputs, padded_mels, teacher_forced_ratio)
+        decoder_outputs, stop_tokens = self.decoder(encoder_outputs, text_lengths, padded_mels, teacher_forced_ratio)
         decoder_outputs = decoder_outputs.transpose(1, 2)
 
         postnet_outputs = self.postnet(decoder_outputs)
@@ -449,6 +530,7 @@ class Tacotron2(nn.Module):
         text = text.unsqueeze(0)
 
         embedded_inputs = self.embedding(text)
+        # (B, MAX_LENGTH, embedding_dim) -> (B, embedding_dim, MAX_LENGTH)
         embedded_inputs = embedded_inputs.transpose(1, 2)
 
         encoder_outputs = self.encoder.inference(embedded_inputs)

@@ -1,43 +1,14 @@
 import params
-from data import LabelledMelDataset, PadCollate, LJSpeechLoader, prepare_input, load_from_files, set_seed, \
-    save_mels_to_png, dynamic_range_decompression
-from griffin_lim import save_mel_to_wav
-from model import Tacotron2
+import sys
+import os
+import math
 import torch
+import torch.nn as nn
+
 from torch import optim
 from torch.utils import data
-import torch.nn as nn
-import math
-import griffin_lim
-
-
-def calculate_teacher_forced_ratio(epoch):
-    decay_steps = params.teacher_forcing_decay_steps
-    alpha = params.teacher_forcing_decay_alpha
-    init_tfr = params.teacher_forcing_init_ratio
-
-    global_step = (epoch - 42.6) * 390
-
-    # https://www.tensorflow.org/api_docs/python/tf/train/cosine_decay
-    global_step = max(0, min(global_step, decay_steps))
-    cosine_decay = 0.5 * (1 + math.cos(math.pi * global_step / decay_steps))
-    decayed = (1 - alpha) * cosine_decay + alpha
-    decayed_teacher_forced_ratio = init_tfr * decayed
-
-    return decayed_teacher_forced_ratio
-
-
-def calculate_exponential_lr(epoch):
-    # from pytorch docs
-    #     def get_lr(self):
-    #         return [base_lr * self.gamma ** self.last_epoch
-    #                 for base_lr in self.base_lrs]
-
-    offset_epoch = epoch - 260
-
-    lr = max(params.learning_rate_min, params.learning_rate * params.gamma_decay ** offset_epoch)
-
-    return lr
+from model import Tacotron2
+from data import LabelledMelDataset, PadCollate, LJSpeechLoader, prepare_input, load_from_files, set_seed
 
 
 def calculate_loss(model, batch, teacher_forced_ratio, criterion, criterion_stop):
@@ -50,17 +21,31 @@ def calculate_loss(model, batch, teacher_forced_ratio, criterion, criterion_stop
         y_pred_post[b][mel_lengths[b]:][:] = 0
         pred_stop_tokens[b][mel_lengths[b]:] = 1
 
-    loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels) + \
-        criterion_stop(pred_stop_tokens, padded_stop_tokens)
+    loss = criterion(y_pred, padded_mels) + criterion(y_pred_post, padded_mels)
+    # for stop token prediction add criterion_stop(pred_stop_tokens, padded_stop_tokens) to the loss
 
+    # evaluation code
     '''
     mels = dynamic_range_decompression(y_pred_post)
-    out_mel = mels.detach().cpu().numpy()[0].T
-    save_mels_to_png((out_mel, ), ("Title", ), "zzzz")
-    save_mel_to_wav(out_mel, "zzz")
+    mel = mels.detach().cpu().numpy()[0].T
+    save_mels_to_png((mel, ), ('', ), 'zoutputz')
+    save_mel_to_wav(mel, 'zoutputz')
     '''
 
     return loss
+
+
+def calculate_exponential_lr(epoch):
+    # adapted from pytorch docs i.e.
+    #     def get_lr(self):
+    #         return [base_lr * self.gamma ** self.last_epoch
+    #                 for base_lr in self.base_lrs]
+
+    offset_epoch = epoch - params.learning_rate_start_epoch
+
+    lr = max(params.learning_rate_min, params.learning_rate * params.gamma_decay ** offset_epoch)
+
+    return lr
 
 
 def train(use_multiple_gpus=False):
@@ -150,8 +135,10 @@ def train(use_multiple_gpus=False):
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimiser.state_dict()},
                     params.checkpoint_path)
-
+        
             validate(model, train_loader, val_loader, criterion, criterion_stop, epoch)
+
+        validate(model, train_loader, val_loader, criterion, criterion_stop, epoch)
 
 
 @torch.no_grad()  # no need for backpropagation -> speeds up computation
@@ -190,13 +177,13 @@ def validate(model, train_loader, val_loader, criterion, criterion_stop, epoch):
 
 
 if __name__ == '__main__':
-    '''
-    use_multiple_gpus = False
+    # use_multiple_gpus = False
 
     if len(sys.argv) > 1:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = sys.argv[1]
-    else:
+
+    '''
         if torch.cuda.device_count() > 1:
             print("Let's use", torch.cuda.device_count(), "GPUs!")
             use_multiple_gpus = True
@@ -205,3 +192,20 @@ if __name__ == '__main__':
     set_seed(params.seed)
 
     train()
+
+
+# not used
+def calculate_teacher_forced_ratio(epoch):
+    decay_steps = params.teacher_forcing_decay_steps
+    alpha = params.teacher_forcing_decay_alpha
+    init_tfr = params.teacher_forcing_init_ratio
+
+    global_step = epoch * 390
+
+    # taken from https://www.tensorflow.org/api_docs/python/tf/train/cosine_decay
+    global_step = max(0, min(global_step, decay_steps))
+    cosine_decay = 0.5 * (1 + math.cos(math.pi * global_step / decay_steps))
+    decayed = (1 - alpha) * cosine_decay + alpha
+    decayed_teacher_forced_ratio = init_tfr * decayed
+
+    return decayed_teacher_forced_ratio
